@@ -76,29 +76,48 @@ public class Incident {
         this.source = source;
     }
 
+    public Incident(String title, String description, String incidentType, String source, LocalDateTime occurredAt) {
+        this(title, description, incidentType, source);
+        this.occurredAt = occurredAt;
+    }
+
     public void assignTo(String assignedTo) {
         this.assignedTo = assignedTo;
         touch();
     }
 
     public void startInvestigation() {
+        if (this.status != IncidentStatus.OPEN) {
+            throw new IllegalStateException("Only OPEN incidents can be investigated");
+        }
         this.status = IncidentStatus.IN_INVESTIGATION;
-        touch();
+        this.updatedAt = LocalDateTime.now();
     }
 
     public void identifyRootCause(RootCause rootCause) {
+        if (this.status != IncidentStatus.IN_INVESTIGATION) {
+            throw new IllegalStateException("Incident must be under investigation before resolving");
+        }
         this.rootCause = rootCause;
-        this.status = IncidentStatus.IN_INVESTIGATION;
         touch();
     }
 
     public void resolve() {
+        if (this.status != IncidentStatus.IN_INVESTIGATION) {
+            throw new IllegalStateException("Incident must be under investigation before resolving");
+        }
+        if (this.rootCause == null) {
+            throw new IllegalStateException("Incident must have a root cause before resolving");
+        }
         this.status = IncidentStatus.RESOLVED;
         this.resolvedAt = LocalDateTime.now();
         touch();
     }
 
     public void close() {
+        if (this.status != IncidentStatus.RESOLVED) {
+            throw new IllegalStateException("Only resolved incidents can be closed");
+        }
         this.status = IncidentStatus.CLOSED;
         this.resolvedAt = LocalDateTime.now();
         touch();
