@@ -5,6 +5,7 @@ import com.CemHarput.IncidentInvestigator.incident.api.IncidentResponse;
 import com.CemHarput.IncidentInvestigator.incident.api.RootCauseResponse;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
 import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
+import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundException;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -36,7 +37,7 @@ public class IncidentService {
     @Transactional(readOnly = true)
     public IncidentResponse getIncident(Long id) {
         Incident incident = incidentRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Incident not found with id: " + id));
+                .orElseThrow(() -> new IncidentNotFoundException(id));
         return toResponse(incident);
     }
 
@@ -49,7 +50,7 @@ public class IncidentService {
 
     public IncidentResponse startInvestigation(Long id) {
         Incident incident = incidentRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Incident not found with id: " + id));
+                .orElseThrow(() -> new IncidentNotFoundException(id));
 
         incident.startInvestigation();
 

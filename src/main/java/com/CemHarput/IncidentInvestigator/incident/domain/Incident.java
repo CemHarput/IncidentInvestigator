@@ -1,5 +1,6 @@
 package com.CemHarput.IncidentInvestigator.incident.domain;
 
+import com.CemHarput.IncidentInvestigator.incident.exception.InvalidIncidentStateException;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -88,7 +89,7 @@ public class Incident {
 
     public void startInvestigation() {
         if (this.status != IncidentStatus.OPEN) {
-            throw new IllegalStateException("Only OPEN incidents can be investigated");
+            throw new InvalidIncidentStateException("Only OPEN incidents can be investigated");
         }
         this.status = IncidentStatus.IN_INVESTIGATION;
         this.updatedAt = LocalDateTime.now();
@@ -96,7 +97,7 @@ public class Incident {
 
     public void identifyRootCause(RootCause rootCause) {
         if (this.status != IncidentStatus.IN_INVESTIGATION) {
-            throw new IllegalStateException("Incident must be under investigation before resolving");
+            throw new InvalidIncidentStateException("Incident must be under investigation before resolving");
         }
         this.rootCause = rootCause;
         touch();
@@ -104,10 +105,10 @@ public class Incident {
 
     public void resolve() {
         if (this.status != IncidentStatus.IN_INVESTIGATION) {
-            throw new IllegalStateException("Incident must be under investigation before resolving");
+            throw new InvalidIncidentStateException("Incident must be under investigation before resolving");
         }
         if (this.rootCause == null) {
-            throw new IllegalStateException("Incident must have a root cause before resolving");
+            throw new InvalidIncidentStateException("Incident must have a root cause before resolving");
         }
         this.status = IncidentStatus.RESOLVED;
         this.resolvedAt = LocalDateTime.now();
@@ -116,7 +117,7 @@ public class Incident {
 
     public void close() {
         if (this.status != IncidentStatus.RESOLVED) {
-            throw new IllegalStateException("Only resolved incidents can be closed");
+            throw new InvalidIncidentStateException("Only resolved incidents can be closed");
         }
         this.status = IncidentStatus.CLOSED;
         this.resolvedAt = LocalDateTime.now();
