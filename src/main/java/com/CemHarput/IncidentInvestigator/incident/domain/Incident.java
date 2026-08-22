@@ -1,22 +1,64 @@
 package com.CemHarput.IncidentInvestigator.incident.domain;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
+@Entity
+@Table(name = "incidents")
 public class Incident {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false)
     private String title;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String description;
+
+    @Column(name = "incident_type", nullable = false)
     private String incidentType;
+
+    @Column(nullable = false)
     private String source;
+
+    @Column(name = "assigned_to")
     private String assignedTo;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private IncidentStatus status;
+
+    @Column(name = "reported_at", nullable = false)
     private LocalDateTime reportedAt;
+
+    @Column(name = "occurred_at")
     private LocalDateTime occurredAt;
+
+    @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    @JoinColumn(name = "root_cause_id")
     private RootCause rootCause;
 
     public Incident() {

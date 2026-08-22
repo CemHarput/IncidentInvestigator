@@ -1,14 +1,32 @@
 package com.CemHarput.IncidentInvestigator.incident.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
+@Entity
+@Table(name = "root_causes")
 public class RootCause {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(nullable = false)
     private String summary;
+
+    @Column(name = "root_cause_type")
     private String rootCauseType;
+
+    @Column(nullable = false)
     private boolean confirmed;
+
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     public RootCause() {
@@ -74,7 +92,7 @@ public class RootCause {
         return confirmed == rootCause.confirmed
                 && Objects.equals(id, rootCause.id)
                 && Objects.equals(summary, rootCause.summary)
-                && Objects.equals(rootCauseType, rootCauseType)
+                && Objects.equals(rootCauseType, rootCause.rootCauseType)
                 && Objects.equals(createdAt, rootCause.createdAt);
     }
 
