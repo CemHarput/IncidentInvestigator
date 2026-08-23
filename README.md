@@ -191,35 +191,5 @@ This application aims to make operational incident management more organized, tr
 The following diagram shows the high-level architecture of the IncidentInvestigator application.
 
 ```mermaid
-graph LR
-    Client["Client / UI / curl"]
-
-    subgraph App["IncidentInvestigator - Spring Boot"]
-        direction TB
-
-        Controller["REST Controller<br/>/api/v1/*"]
-        Service["Service Layer<br/>(Transactional)"]
-        Domain["Domain Model<br/>(Incident, Evidence, RootCause)"]
-        Repo["Spring Data JPA Repositories"]
-        Persistence[("JPA / Hibernate")]
-    end
-
-    Postgres[("PostgreSQL")]
-    Testcontainers["Testcontainers<br/>(Postgres integration tests)"]
-    Kafka["Kafka / Messaging"]
-    Admin["Admin / Operators"]
-
-    Client -->|HTTP| Controller
-    Controller --> Service
-    Service --> Domain
-    Service -->|calls| Repo
-    Repo --> Persistence
-    Persistence --> Postgres
-    Testcontainers --> Postgres
-    Service -->|publishes| Kafka
-    Admin -->|monitoring / ops| Postgres
-    Admin -->|deploy| App
-
-    classDef db fill:#f9f,stroke:#333,stroke-width:1px
-    class Postgres,Testcontainers db
+graph LR Client["Client / UI / curl"] Admin["Admin / Operators"] Kafka["Kafka / Messaging"] Postgres[("PostgreSQL")] subgraph App["IncidentInvestigator - Spring Boot"] direction TB Controller["REST Controller<br/>/api/v1/*"] Service["Application Service Layer<br/>(Transactional)"] Domain["Domain Model<br/>(Incident, Evidence, RootCause)"] Repo["Spring Data JPA Repositories"] ORM["Hibernate / JPA"] Controller --> Service Service --> Domain Service -->|loads / saves| Repo Repo --> ORM end subgraph TestEnv["Integration Test Environment"] direction TB Tests["Spring Boot Integration Tests"] Testcontainers["Testcontainers"] TestPostgres[("PostgreSQL Test Container")] Tests --> Testcontainers Testcontainers --> TestPostgres end Client -->|HTTP| Controller ORM --> Postgres Service -->|publishes events| Kafka Admin -->|deploys / operates| App Admin -->|monitoring / operations| Postgres classDef database fill:#f9f,stroke:#333,stroke-width:1px class Postgres,TestPostgres database
 ```
