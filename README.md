@@ -1,5 +1,71 @@
 # IncidentInvestigator
 
+Lightweight Spring Boot service to manage incidents, root-cause investigation and evidence collection.
+
+Core features
+- DDD-style domain model for `Incident` and `RootCause`.
+- Evidence vertical slice: `Evidence` entity, `EvidenceType` enum, `addEvidence()` lifecycle rules.
+- REST API for incident lifecycle and evidence collection.
+- JPA/Hibernate persistence with Testcontainers-backed PostgreSQL integration tests.
+
+Tech
+- Java 25, Spring Boot 4.1.1
+- JPA / Hibernate
+- Testcontainers (PostgreSQL) for integration tests
+
+Run tests
+- Run full test suite (unit + integration):
+
+```powershell
+.\mvnw test -DskipITs=false
+```
+
+- Run only the PostgreSQL integration test:
+
+```powershell
+.\mvnw -Dtest=IncidentPostgresIntegrationTest test
+```
+
+Note: Integration tests require Docker (Testcontainers).
+
+API (important endpoints)
+
+- Create incident
+  - POST /api/v1/incidents
+  - Request: `CreateIncidentRequest` (title, description, incidentType, source, occurredAt)
+
+- Get incident
+  - GET /api/v1/incidents/{id}
+  - Response: `IncidentResponse` includes `rootCause` and `evidence` list
+
+- Start investigation
+  - POST /api/v1/incidents/{id}/investigation
+
+- Add root cause
+  - POST /api/v1/incidents/{id}/root-cause
+  - Request: `AddRootCauseRequest` (summary, rootCauseType, confirmed)
+
+- Add evidence
+  - POST /api/v1/incidents/{id}/evidence
+  - Request: `AddEvidenceRequest` (type: LOG|METRIC|TRACE, source, content, observedAt)
+
+- Resolve / Close
+  - POST /api/v1/incidents/{id}/resolve
+  - POST /api/v1/incidents/{id}/close
+
+Design notes
+- Evidence can only be added while an incident is `IN_INVESTIGATION` — domain enforces this and throws `InvalidIncidentStateException` otherwise.
+- `Incident` owns `Evidence` with `@OneToMany(cascade = ALL, orphanRemoval = true)` and `@JoinColumn(name = "incident_id")` so evidence is persisted with the incident.
+- Service layer methods are `@Transactional` and mapping to DTOs happens inside the service to avoid lazy-loading issues.
+
+Next steps
+- Add a persistence integration test to verify evidence cascade and mapping (todo: `Add persistence integration test for Evidence cascade`).
+- Commit and open a PR when ready.
+
+Contact
+- For changes or questions, update code under `src/main/java/com/CemHarput/IncidentInvestigator` and run the tests locally.
+# IncidentInvestigator
+
 IncidentInvestigator is a Spring Boot-based application for recording, tracking, and managing operational incidents such as failures, errors, and service disruptions.
 
 The main goals of the project are to:
