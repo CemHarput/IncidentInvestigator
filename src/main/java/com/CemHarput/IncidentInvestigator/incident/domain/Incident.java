@@ -120,7 +120,7 @@ public class Incident {
             throw new InvalidIncidentStateException("Only resolved incidents can be closed");
         }
         this.status = IncidentStatus.CLOSED;
-        this.resolvedAt = LocalDateTime.now();
+        // Do not overwrite resolvedAt here; it is set during resolve()
         touch();
     }
 
@@ -135,134 +135,76 @@ public class Incident {
     public Long getId() {
         return id;
     }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
+    
 
     public String getTitle() {
         return title;
     }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
+    
 
     public String getDescription() {
         return description;
     }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
+    
 
     public String getIncidentType() {
         return incidentType;
     }
-
-    public void setIncidentType(String incidentType) {
-        this.incidentType = incidentType;
-    }
+    
 
     public String getSource() {
         return source;
     }
-
-    public void setSource(String source) {
-        this.source = source;
-    }
+    
 
     public String getAssignedTo() {
         return assignedTo;
     }
-
-    public void setAssignedTo(String assignedTo) {
-        this.assignedTo = assignedTo;
-    }
+    
 
     public IncidentStatus getStatus() {
         return status;
     }
-
-    public void setStatus(IncidentStatus status) {
-        this.status = status;
-    }
+    
 
     public LocalDateTime getReportedAt() {
         return reportedAt;
     }
-
-    public void setReportedAt(LocalDateTime reportedAt) {
-        this.reportedAt = reportedAt;
-    }
+    
 
     public LocalDateTime getOccurredAt() {
         return occurredAt;
     }
-
-    public void setOccurredAt(LocalDateTime occurredAt) {
-        this.occurredAt = occurredAt;
-    }
+    
 
     public LocalDateTime getResolvedAt() {
         return resolvedAt;
     }
-
-    public void setResolvedAt(LocalDateTime resolvedAt) {
-        this.resolvedAt = resolvedAt;
-    }
+    
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
+    
 
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
     }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
+    
 
     public RootCause getRootCause() {
         return rootCause;
     }
-
-    public void setRootCause(RootCause rootCause) {
-        this.rootCause = rootCause;
-    }
+    
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        Incident incident = (Incident) o;
-        return Objects.equals(id, incident.id)
-                && Objects.equals(title, incident.title)
-                && Objects.equals(description, incident.description)
-                && Objects.equals(incidentType, incident.incidentType)
-                && Objects.equals(source, incident.source)
-                && Objects.equals(assignedTo, incident.assignedTo)
-                && status == incident.status
-                && Objects.equals(reportedAt, incident.reportedAt)
-                && Objects.equals(occurredAt, incident.occurredAt)
-                && Objects.equals(resolvedAt, incident.resolvedAt)
-                && Objects.equals(createdAt, incident.createdAt)
-                && Objects.equals(updatedAt, incident.updatedAt)
-                && Objects.equals(rootCause, incident.rootCause);
+        // Use identity equality; do not depend on mutable fields for equals/hashCode
+        return this == o || (o instanceof Incident other && Objects.equals(this.id, other.id));
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, title, description, incidentType, source, assignedTo, status,
-                reportedAt, occurredAt, resolvedAt, createdAt, updatedAt, rootCause);
+        return Objects.hashCode(id);
     }
 }

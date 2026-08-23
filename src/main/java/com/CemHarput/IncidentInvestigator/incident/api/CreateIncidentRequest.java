@@ -7,7 +7,7 @@ public record CreateIncidentRequest(
         @NotBlank(message = "Title is required") String title,
         @NotBlank(message = "Description is required") String description,
         @NotBlank(message = "Incident type is required") String incidentType,
-        String source,
+        @NotBlank(message = "Source is required") String source,
         LocalDateTime occurredAt
 ) {
 }

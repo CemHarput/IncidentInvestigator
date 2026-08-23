@@ -1,6 +1,7 @@
 package com.CemHarput.IncidentInvestigator.incident.application;
 
 import com.CemHarput.IncidentInvestigator.incident.api.CreateIncidentRequest;
+import com.CemHarput.IncidentInvestigator.incident.api.AddRootCauseRequest;
 import com.CemHarput.IncidentInvestigator.incident.api.IncidentResponse;
 import com.CemHarput.IncidentInvestigator.incident.api.RootCauseResponse;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
@@ -36,9 +37,7 @@ public class IncidentService {
 
     @Transactional(readOnly = true)
     public IncidentResponse getIncident(Long id) {
-        Incident incident = incidentRepository.findById(id)
-                .orElseThrow(() -> new IncidentNotFoundException(id));
-        return toResponse(incident);
+        return toResponse(findIncident(id));
     }
 
     @Transactional(readOnly = true)
@@ -49,13 +48,33 @@ public class IncidentService {
     }
 
     public IncidentResponse startInvestigation(Long id) {
-        Incident incident = incidentRepository.findById(id)
-                .orElseThrow(() -> new IncidentNotFoundException(id));
-
+        Incident incident = findIncident(id);
         incident.startInvestigation();
+        return toResponse(incident);
+    }
 
-        Incident updatedIncident = incidentRepository.save(incident);
-        return toResponse(updatedIncident);
+    public IncidentResponse addRootCause(Long id, AddRootCauseRequest request) {
+        Incident incident = findIncident(id);
+        RootCause rootCause = new RootCause(request.summary(), request.rootCauseType(), request.confirmed());
+        incident.identifyRootCause(rootCause);
+        return toResponse(incident);
+    }
+
+    public IncidentResponse resolveIncident(Long id) {
+        Incident incident = findIncident(id);
+        incident.resolve();
+        return toResponse(incident);
+    }
+
+    public IncidentResponse closeIncident(Long id) {
+        Incident incident = findIncident(id);
+        incident.close();
+        return toResponse(incident);
+    }
+
+    private Incident findIncident(Long id) {
+        return incidentRepository.findById(id)
+                .orElseThrow(() -> new IncidentNotFoundException(id));
     }
     // we do not need seperate mapper class for the currency state of the project
     private IncidentResponse toResponse(Incident incident) {

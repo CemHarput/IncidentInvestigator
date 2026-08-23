@@ -41,7 +41,23 @@ public class IncidentController {
     }
 
     @PostMapping("/{id}/investigation")
-    public IncidentResponse startInvestigation(@PathVariable Long id) {
-        return incidentService.startInvestigation(id);
+    public ResponseEntity<IncidentResponse> startInvestigation(@PathVariable Long id) {
+        return ResponseEntity.ok(incidentService.startInvestigation(id));
+    }
+
+    @PostMapping("/{id}/root-cause")
+    public ResponseEntity<IncidentResponse> addRootCause(@PathVariable Long id,
+                                                         @Valid @RequestBody AddRootCauseRequest request) {
+        return ResponseEntity.ok(incidentService.addRootCause(id, request));
+    }
+
+    @PostMapping("/{id}/resolve")
+    public ResponseEntity<IncidentResponse> resolveIncident(@PathVariable Long id) {
+        return ResponseEntity.ok(incidentService.resolveIncident(id));
+    }
+
+    @PostMapping("/{id}/close")
+    public ResponseEntity<IncidentResponse> closeIncident(@PathVariable Long id) {
+        return ResponseEntity.ok(incidentService.closeIncident(id));
     }
 }
