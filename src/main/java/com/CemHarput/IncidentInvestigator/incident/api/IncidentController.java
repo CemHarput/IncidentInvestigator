@@ -51,6 +51,12 @@ public class IncidentController {
         return ResponseEntity.ok(incidentService.addRootCause(id, request));
     }
 
+    @PostMapping("/{id}/evidence")
+    public ResponseEntity<IncidentResponse> addEvidence(@PathVariable Long id,
+                                                        @Valid @RequestBody AddEvidenceRequest request) {
+        return ResponseEntity.ok(incidentService.addEvidence(id, request));
+    }
+
     @PostMapping("/{id}/resolve")
     public ResponseEntity<IncidentResponse> resolveIncident(@PathVariable Long id) {
         return ResponseEntity.ok(incidentService.resolveIncident(id));

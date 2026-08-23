@@ -2,10 +2,13 @@ package com.CemHarput.IncidentInvestigator.incident.application;
 
 import com.CemHarput.IncidentInvestigator.incident.api.CreateIncidentRequest;
 import com.CemHarput.IncidentInvestigator.incident.api.AddRootCauseRequest;
+import com.CemHarput.IncidentInvestigator.incident.api.AddEvidenceRequest;
+import com.CemHarput.IncidentInvestigator.incident.api.EvidenceResponse;
 import com.CemHarput.IncidentInvestigator.incident.api.IncidentResponse;
 import com.CemHarput.IncidentInvestigator.incident.api.RootCauseResponse;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
 import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
+import com.CemHarput.IncidentInvestigator.incident.domain.Evidence;
 import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundException;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import java.util.List;
@@ -60,6 +63,18 @@ public class IncidentService {
         return toResponse(incident);
     }
 
+    public IncidentResponse addEvidence(Long id, AddEvidenceRequest request) {
+        Incident incident = findIncident(id);
+        Evidence evidence = new Evidence(
+                request.type(),
+                request.source(),
+                request.content(),
+                request.observedAt()
+        );
+        incident.addEvidence(evidence);
+        return toResponse(incident);
+    }
+
     public IncidentResponse resolveIncident(Long id) {
         Incident incident = findIncident(id);
         incident.resolve();
@@ -90,6 +105,17 @@ public class IncidentService {
             );
         }
 
+        List<EvidenceResponse> evidenceResponses = incident.getEvidence().stream()
+            .map(e -> new EvidenceResponse(
+                e.getId(),
+                e.getType(),
+                e.getSource(),
+                e.getContent(),
+                e.getObservedAt(),
+                e.getCreatedAt()
+            ))
+            .toList();
+
         return new IncidentResponse(
                 incident.getId(),
                 incident.getTitle(),
@@ -103,7 +129,8 @@ public class IncidentService {
                 incident.getResolvedAt(),
                 incident.getCreatedAt(),
                 incident.getUpdatedAt(),
-                rootCauseResponse
+                rootCauseResponse,
+                evidenceResponses
         );
     }
 }

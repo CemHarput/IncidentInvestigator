@@ -2,6 +2,7 @@ package com.CemHarput.IncidentInvestigator.incident.api;
 
 import com.CemHarput.IncidentInvestigator.incident.domain.IncidentStatus;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record IncidentResponse(
         Long id,
@@ -16,6 +17,7 @@ public record IncidentResponse(
         LocalDateTime resolvedAt,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        RootCauseResponse rootCause
+        RootCauseResponse rootCause,
+        List<EvidenceResponse> evidence
 ) {
 }

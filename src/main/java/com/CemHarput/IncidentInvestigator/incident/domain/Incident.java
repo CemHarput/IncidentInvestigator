@@ -12,6 +12,10 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
+import jakarta.persistence.OneToMany;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.Objects;
@@ -61,6 +65,10 @@ public class Incident {
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @JoinColumn(name = "root_cause_id")
     private RootCause rootCause;
+
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+    @JoinColumn(name = "incident_id")
+    private List<Evidence> evidence = new ArrayList<>();
 
     public Incident() {
         this.status = IncidentStatus.OPEN;
@@ -194,6 +202,18 @@ public class Incident {
 
     public RootCause getRootCause() {
         return rootCause;
+    }
+
+    public List<Evidence> getEvidence() {
+        return Collections.unmodifiableList(evidence);
+    }
+
+    public void addEvidence(Evidence evidence) {
+        if (this.status != IncidentStatus.IN_INVESTIGATION) {
+            throw new InvalidIncidentStateException("Evidence can only be added during investigation");
+        }
+        this.evidence.add(evidence);
+        touch();
     }
     
 
