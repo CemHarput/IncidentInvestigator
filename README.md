@@ -191,5 +191,59 @@ This application aims to make operational incident management more organized, tr
 The following diagram shows the high-level architecture of the IncidentInvestigator application.
 
 ```mermaid
-graph LR Client["Client / UI / curl"] Admin["Admin / Operators"] Kafka["Kafka / Messaging"] Postgres[("PostgreSQL")] subgraph App["IncidentInvestigator - Spring Boot"] direction TB Controller["REST Controller<br/>/api/v1/*"] Service["Application Service Layer<br/>(Transactional)"] Domain["Domain Model<br/>(Incident, Evidence, RootCause)"] Repo["Spring Data JPA Repositories"] ORM["Hibernate / JPA"] Controller --> Service Service --> Domain Service -->|loads / saves| Repo Repo --> ORM end subgraph TestEnv["Integration Test Environment"] direction TB Tests["Spring Boot Integration Tests"] Testcontainers["Testcontainers"] TestPostgres[("PostgreSQL Test Container")] Tests --> Testcontainers Testcontainers --> TestPostgres end Client -->|HTTP| Controller ORM --> Postgres Service -->|publishes events| Kafka Admin -->|deploys / operates| App Admin -->|monitoring / operations| Postgres classDef database fill:#f9f,stroke:#333,stroke-width:1px class Postgres,TestPostgres database
+graph LR
+    Client["Client / UI / curl"]
+    Admin["Admin / Operators"]
+    Kafka["Kafka / Messaging"]
+    Postgres[("PostgreSQL")]
+
+    subgraph App["IncidentInvestigator - Spring Boot"]
+        direction TB
+
+        Controller["REST Controller<br/>/api/v1/*"]
+        Service["Application Service Layer<br/>(Transactional)"]
+        Domain["Domain Model<br/>(Incident, Evidence, RootCause)"]
+        Repo["Spring Data JPA Repositories"]
+        ORM["Hibernate / JPA"]
+
+        Controller --> Service
+        Service --> Domain
+        Service -->|loads / saves| Repo
+        Repo --> ORM
+    end
+
+    subgraph TestEnv["Integration Test Environment"]
+        direction TB
+
+        Tests["Spring Boot Integration Tests"]
+        Testcontainers["Testcontainers"]
+        TestPostgres[("PostgreSQL Test Container")]
+
+        Tests --> Testcontainers
+        Testcontainers --> TestPostgres
+    end
+
+    Client -->|HTTP| Controller
+    ORM --> Postgres
+
+    Service -->|publishes events| Kafka
+
+    Admin -->|deploys / operates| App
+    Admin -->|monitoring / operations| Postgres
+
+    classDef database fill:#f9f,stroke:#333,stroke-width:1px
+    class Postgres,TestPostgres database
 ```
+
+### Architecture Notes
+
+- The REST controller exposes the `/api/v1/*` endpoints and delegates application use cases to the service layer.
+- The application service layer defines transaction boundaries with `@Transactional`.
+- Application services coordinate both domain behavior and persistence operations.
+- Domain entities such as `Incident`, `Evidence`, and `RootCause` contain core business rules and lifecycle behavior.
+- Spring Data JPA repositories provide persistence abstractions.
+- Hibernate / JPA acts as the ORM layer between repositories and PostgreSQL.
+- PostgreSQL represents the application's persistent database.
+- Integration tests use Testcontainers to start a separate ephemeral PostgreSQL container and do not connect to the application's normal PostgreSQL instance.
+- Kafka is shown as an external messaging system that application services can publish events to.
+- Admins and operators deploy and operate the Spring Boot application rather than interacting with the domain model directly.
