@@ -192,32 +192,34 @@ The following diagram shows the high-level architecture of the IncidentInvestiga
 
 ```mermaid
 graph LR
-  Client[Client / UI / curl]
-  subgraph App [IncidentInvestigator (Spring Boot)]
-    direction TB
-    Controller[REST Controller\n/api/v1/*]
-    Service[Service Layer]\n(Transactional)
-    Domain[Domain Model\n(Incident, Evidence, RootCause)]
-    Repo[Spring Data JPA Repositories]
-    Persistence[(JPA / Hibernate)]
-  end
+    Client["Client / UI / curl"]
 
-  Postgres[(PostgreSQL)]
-  Testcontainers[Testcontainers (Postgres) - integration tests]
-  Kafka[Kafka / Messaging]
-  Admin[Admin / Operators]
+    subgraph App["IncidentInvestigator - Spring Boot"]
+        direction TB
 
-  Client -->|HTTP| Controller
-  Controller --> Service
-  Service --> Domain
-  Service -->|calls| Repo
-  Repo --> Persistence
-  Persistence --> Postgres
-  Testcontainers --> Postgres
-  Service -->|publishes| Kafka
-  Admin -->|monitoring,ops| Postgres
-  Admin -->|deploy| App
+        Controller["REST Controller<br/>/api/v1/*"]
+        Service["Service Layer<br/>(Transactional)"]
+        Domain["Domain Model<br/>(Incident, Evidence, RootCause)"]
+        Repo["Spring Data JPA Repositories"]
+        Persistence[("JPA / Hibernate")]
+    end
 
-  classDef db fill:#f9f,stroke:#333,stroke-width:1px;
-  class Postgres,Testcontainers db;
+    Postgres[("PostgreSQL")]
+    Testcontainers["Testcontainers<br/>(Postgres integration tests)"]
+    Kafka["Kafka / Messaging"]
+    Admin["Admin / Operators"]
+
+    Client -->|HTTP| Controller
+    Controller --> Service
+    Service --> Domain
+    Service -->|calls| Repo
+    Repo --> Persistence
+    Persistence --> Postgres
+    Testcontainers --> Postgres
+    Service -->|publishes| Kafka
+    Admin -->|monitoring / ops| Postgres
+    Admin -->|deploy| App
+
+    classDef db fill:#f9f,stroke:#333,stroke-width:1px
+    class Postgres,Testcontainers db
 ```
