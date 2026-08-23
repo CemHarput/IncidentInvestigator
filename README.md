@@ -54,6 +54,7 @@ API (important endpoints)
   - POST /api/v1/incidents/{id}/close
 
 Design notes
+
 - Evidence can only be added while an incident is `IN_INVESTIGATION` — domain enforces this and throws `InvalidIncidentStateException` otherwise.
 - `Incident` owns `Evidence` with `@OneToMany(cascade = ALL, orphanRemoval = true)` and `@JoinColumn(name = "incident_id")` so evidence is persisted with the incident.
 - Service layer methods are `@Transactional` and mapping to DTOs happens inside the service to avoid lazy-loading issues.
@@ -184,3 +185,39 @@ This project is still in its early development stage. The domain model and found
 ## Development Goal
 
 This application aims to make operational incident management more organized, traceable, and analyzable. In particular, it supports faster response, root-cause identification, and operational visibility during failures and service disruptions.
+
+## Architecture
+
+The following diagram shows the high-level architecture of the IncidentInvestigator application.
+
+```mermaid
+graph LR
+  Client[Client / UI / curl]
+  subgraph App [IncidentInvestigator (Spring Boot)]
+    direction TB
+    Controller[REST Controller\n/api/v1/*]
+    Service[Service Layer]\n(Transactional)
+    Domain[Domain Model\n(Incident, Evidence, RootCause)]
+    Repo[Spring Data JPA Repositories]
+    Persistence[(JPA / Hibernate)]
+  end
+
+  Postgres[(PostgreSQL)]
+  Testcontainers[Testcontainers (Postgres) - integration tests]
+  Kafka[Kafka / Messaging]
+  Admin[Admin / Operators]
+
+  Client -->|HTTP| Controller
+  Controller --> Service
+  Service --> Domain
+  Service -->|calls| Repo
+  Repo --> Persistence
+  Persistence --> Postgres
+  Testcontainers --> Postgres
+  Service -->|publishes| Kafka
+  Admin -->|monitoring,ops| Postgres
+  Admin -->|deploy| App
+
+  classDef db fill:#f9f,stroke:#333,stroke-width:1px;
+  class Postgres,Testcontainers db;
+```
