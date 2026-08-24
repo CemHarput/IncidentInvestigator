@@ -18,7 +18,6 @@ import java.util.Collections;
 import java.util.List;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
-import java.util.Objects;
 
 @Entity
 @Table(name = "incidents")
