@@ -1,5 +1,8 @@
 package com.CemHarput.IncidentInvestigator.common.exception;
 
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResponseException;
 import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundException;
 import com.CemHarput.IncidentInvestigator.incident.exception.InvalidIncidentStateException;
 import java.time.LocalDateTime;
@@ -33,6 +36,39 @@ public class GlobalExceptionHandler {
         );
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    @ExceptionHandler(AnalysisNotAllowedException.class)
+    public ResponseEntity<ApiError> handleAnalysisNotAllowed(AnalysisNotAllowedException ex) {
+        ApiError error = new ApiError(
+                "ANALYSIS_NOT_ALLOWED",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler(AnalyzerUnavailableException.class)
+    public ResponseEntity<ApiError> handleAnalyzerUnavailable(AnalyzerUnavailableException ex) {
+        ApiError error = new ApiError(
+                "ANALYZER_UNAVAILABLE",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+    }
+
+    @ExceptionHandler(InvalidAnalyzerResponseException.class)
+    public ResponseEntity<ApiError> handleInvalidAnalyzerResponse(InvalidAnalyzerResponseException ex) {
+        ApiError error = new ApiError(
+                "INVALID_ANALYZER_RESPONSE",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

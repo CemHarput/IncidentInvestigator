@@ -1,4 +1,9 @@
 package com.CemHarput.IncidentInvestigator.analysis.client;
 
-public class IncidentAnalyzerClient {
+import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisRequest;
+import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
+
+public interface IncidentAnalyzerClient {
+
+    AnalysisResponse analyze(AnalysisRequest request);
 }

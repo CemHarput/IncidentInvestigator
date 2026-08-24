@@ -215,16 +215,23 @@ public class Incident {
         this.evidence.add(evidence);
         touch();
     }
-    
+  
 
     @Override
     public boolean equals(Object o) {
-        // Use identity equality; do not depend on mutable fields for equals/hashCode
-        return this == o || (o instanceof Incident other && Objects.equals(this.id, other.id));
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof Incident other)) {
+            return false;
+        }
+
+        return id != null && id.equals(other.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(id);
+        return getClass().hashCode();
     }
 }

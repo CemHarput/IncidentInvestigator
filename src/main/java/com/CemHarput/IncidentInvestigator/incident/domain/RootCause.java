@@ -72,16 +72,24 @@ public class RootCause {
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
-
-
+    
     @Override
     public boolean equals(Object o) {
-        // Identity equality on id only to avoid mutable-field issues
-        return this == o || (o instanceof RootCause other && Objects.equals(this.id, other.id));
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof RootCause other)) {
+            return false;
+        }
+
+        return id != null && id.equals(other.id);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(id);
+        return getClass().hashCode();
     }
+
+
 }
