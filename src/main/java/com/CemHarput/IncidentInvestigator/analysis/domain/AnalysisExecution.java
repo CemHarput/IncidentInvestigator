@@ -132,10 +132,6 @@ public class AnalysisExecution {
         return id;
     }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public Long getIncidentId() {
         return incidentId;
     }
@@ -174,10 +170,6 @@ public class AnalysisExecution {
 
     public Integer getAttemptCount() {
         return attemptCount;
-    }
-
-    public void setAttemptCount(Integer attemptCount) {
-        this.attemptCount = attemptCount;
     }
 
     public Long getDurationMs() {

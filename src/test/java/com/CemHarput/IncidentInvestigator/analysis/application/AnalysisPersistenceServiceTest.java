@@ -54,11 +54,9 @@ class AnalysisPersistenceServiceTest {
         when(executionRepository.findFirstByIncidentIdAndStatusInOrderByCreatedAtDesc(
                 any(), any()
         )).thenReturn(Optional.empty());
-        when(executionRepository.save(any(AnalysisExecution.class))).thenAnswer(invocation -> {
-            AnalysisExecution execution = invocation.getArgument(0);
-            execution.setId(99L);
-            return execution;
-        });
+        AnalysisExecution savedExecution = mock(AnalysisExecution.class);
+        when(savedExecution.getId()).thenReturn(99L);
+        when(executionRepository.save(any(AnalysisExecution.class))).thenReturn(savedExecution);
 
         AnalysisPersistenceService service = new AnalysisPersistenceService(
                 incidentRepository,
