@@ -2,12 +2,14 @@ package com.CemHarput.IncidentInvestigator.analysis.application;
 
 import com.CemHarput.IncidentInvestigator.analysis.api.AnalysisResultResponse;
 import com.CemHarput.IncidentInvestigator.analysis.client.IncidentAnalyzerClient;
+import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecution;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisEvidence;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisRequest;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateResponse;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResponseException;
+import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecutionRepository;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
 import com.CemHarput.IncidentInvestigator.incident.domain.IncidentStatus;
 import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
@@ -15,6 +17,7 @@ import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundExc
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import java.util.Comparator;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,13 +28,24 @@ public class AnalysisService {
     private static final double MIN_CONFIDENCE = 0.60d;
 
     private final IncidentRepository incidentRepository;
+    private final AnalysisExecutionRepository analysisExecutionRepository;
     private final IncidentAnalyzerClient analyzerClient;
 
     public AnalysisService(
             IncidentRepository incidentRepository,
             IncidentAnalyzerClient analyzerClient
     ) {
+        this(incidentRepository, null, analyzerClient);
+    }
+
+    @Autowired
+    public AnalysisService(
+            IncidentRepository incidentRepository,
+            AnalysisExecutionRepository analysisExecutionRepository,
+            IncidentAnalyzerClient analyzerClient
+    ) {
         this.incidentRepository = incidentRepository;
+        this.analysisExecutionRepository = analysisExecutionRepository;
         this.analyzerClient = analyzerClient;
     }
 
@@ -41,23 +55,51 @@ public class AnalysisService {
 
         validateAnalysisAllowed(incident);
 
-        AnalysisRequest request = toAnalysisRequest(incident);
-        AnalysisResponse response = analyzerClient.analyze(request);
-        validateResponse(incidentId, response);
+        AnalysisExecution execution = createExecution(incidentId);
+        execution.start();
 
-        RootCauseCandidateResponse bestCandidate = selectBestCandidate(response);
+        try {
+            AnalysisRequest request = toAnalysisRequest(incident);
+            AnalysisResponse response = analyzerClient.analyze(request);
+            validateResponse(incidentId, response);
 
-        if (isInconclusive(bestCandidate)) {
-            return AnalysisResultResponse.inconclusive(incidentId, bestCandidate);
+            RootCauseCandidateResponse bestCandidate = selectBestCandidate(response);
+
+            if (isInconclusive(bestCandidate)) {
+                execution.markInconclusive(bestCandidate.confidence());
+                return AnalysisResultResponse.inconclusive(
+                        execution.getId(),
+                        incidentId,
+                        bestCandidate
+                );
+            }
+
+            incident.identifyRootCause(new RootCause(
+                    bestCandidate.explanation(),
+                    bestCandidate.rootCause(),
+                    false
+            ));
+
+            execution.complete(bestCandidate.rootCause(), bestCandidate.confidence());
+
+            return AnalysisResultResponse.identified(
+                    execution.getId(),
+                    incidentId,
+                    bestCandidate
+            );
+        } catch (RuntimeException ex) {
+            if (execution != null) {
+                execution.fail(ex.getMessage());
+            }
+            throw ex;
         }
+    }
 
-        incident.identifyRootCause(new RootCause(
-                bestCandidate.explanation(),
-                bestCandidate.rootCause(),
-                false
-        ));
-
-        return AnalysisResultResponse.identified(incidentId, bestCandidate);
+    private AnalysisExecution createExecution(Long incidentId) {
+        if (analysisExecutionRepository == null) {
+            return AnalysisExecution.create(incidentId);
+        }
+        return analysisExecutionRepository.save(AnalysisExecution.create(incidentId));
     }
 
     private void validateAnalysisAllowed(Incident incident) {

@@ -4,6 +4,7 @@ import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateRespons
 import java.util.List;
 
 public record AnalysisResultResponse(
+        Long executionId,
         Long incidentId,
         String status,
         String rootCause,
@@ -13,7 +14,12 @@ public record AnalysisResultResponse(
 ) {
 
     public static AnalysisResultResponse identified(Long incidentId, RootCauseCandidateResponse candidate) {
+        return identified(null, incidentId, candidate);
+    }
+
+    public static AnalysisResultResponse identified(Long executionId, Long incidentId, RootCauseCandidateResponse candidate) {
         return new AnalysisResultResponse(
+                executionId,
                 incidentId,
                 "ROOT_CAUSE_IDENTIFIED",
                 candidate.rootCause(),
@@ -24,6 +30,10 @@ public record AnalysisResultResponse(
     }
 
     public static AnalysisResultResponse inconclusive(Long incidentId, RootCauseCandidateResponse candidate) {
+        return inconclusive(null, incidentId, candidate);
+    }
+
+    public static AnalysisResultResponse inconclusive(Long executionId, Long incidentId, RootCauseCandidateResponse candidate) {
         String explanation = candidate != null && candidate.explanation() != null && !candidate.explanation().isBlank()
                 ? candidate.explanation()
                 : "Available evidence is insufficient for a confident diagnosis.";
@@ -31,6 +41,7 @@ public record AnalysisResultResponse(
         double confidence = candidate == null ? 0.0d : candidate.confidence();
 
         return new AnalysisResultResponse(
+                executionId,
                 incidentId,
                 "INCONCLUSIVE",
                 "UNKNOWN",

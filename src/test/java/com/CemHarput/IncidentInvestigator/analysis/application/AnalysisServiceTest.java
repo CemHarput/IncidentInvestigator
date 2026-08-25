@@ -10,10 +10,13 @@ import static org.mockito.Mockito.when;
 
 import com.CemHarput.IncidentInvestigator.analysis.api.AnalysisResultResponse;
 import com.CemHarput.IncidentInvestigator.analysis.client.IncidentAnalyzerClient;
+import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecution;
+import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionStatus;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisRequest;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateResponse;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
+import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecutionRepository;
 import com.CemHarput.IncidentInvestigator.incident.domain.Evidence;
 import com.CemHarput.IncidentInvestigator.incident.domain.EvidenceType;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
@@ -73,16 +76,25 @@ class AnalysisServiceTest {
                 )
         ));
 
-        AnalysisService service = new AnalysisService(repository, client);
+        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
+        when(executionRepository.save(any(AnalysisExecution.class))).thenAnswer(invocation -> {
+            AnalysisExecution execution = invocation.getArgument(0);
+            execution.setId(99L);
+            return execution;
+        });
+
+        AnalysisService service = new AnalysisService(repository, executionRepository, client);
 
         AnalysisResultResponse result = service.analyzeIncident(42L);
 
+        assertThat(result.executionId()).isEqualTo(99L);
         assertThat(result.status()).isEqualTo("ROOT_CAUSE_IDENTIFIED");
         assertThat(result.rootCause()).isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
         assertThat(incident.getRootCause()).isNotNull();
         assertThat(incident.getRootCause().getRootCauseType()).isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
         assertThat(incident.getRootCause().isConfirmed()).isFalse();
         assertThat(incident.getStatus()).isEqualTo(IncidentStatus.IN_INVESTIGATION);
+        verify(executionRepository).save(any(AnalysisExecution.class));
     }
 
     @Test
@@ -98,13 +110,15 @@ class AnalysisServiceTest {
         when(repository.findById(42L)).thenReturn(Optional.of(incident));
 
         IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
-        AnalysisService service = new AnalysisService(repository, client);
+        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
+        AnalysisService service = new AnalysisService(repository, executionRepository, client);
 
         assertThatThrownBy(() -> service.analyzeIncident(42L))
                 .isInstanceOf(AnalysisNotAllowedException.class)
                 .hasMessage("Only incidents under investigation can be analyzed");
 
         verify(client, never()).analyze(any(AnalysisRequest.class));
+        verify(executionRepository, never()).save(any(AnalysisExecution.class));
     }
 
     @Test
@@ -118,6 +132,7 @@ class AnalysisServiceTest {
 
         AnalysisResultResponse result = AnalysisResultResponse.inconclusive(42L, candidate);
 
+        assertThat(result.executionId()).isNull();
         assertThat(result.confidence()).isEqualTo(0.05d);
         assertThat(result.status()).isEqualTo("INCONCLUSIVE");
         assertThat(result.rootCause()).isEqualTo("UNKNOWN");
