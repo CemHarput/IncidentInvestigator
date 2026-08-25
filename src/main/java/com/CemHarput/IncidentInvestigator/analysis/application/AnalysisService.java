@@ -17,7 +17,6 @@ import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundExc
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import java.util.Comparator;
 import java.util.List;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,14 +31,6 @@ public class AnalysisService {
     private final AnalysisExecutionRepository analysisExecutionRepository;
     private final IncidentAnalyzerClient analyzerClient;
 
-    public AnalysisService(
-            IncidentRepository incidentRepository,
-            IncidentAnalyzerClient analyzerClient
-    ) {
-        this(incidentRepository, null, analyzerClient);
-    }
-
-    @Autowired
     public AnalysisService(
             IncidentRepository incidentRepository,
             AnalysisExecutionRepository analysisExecutionRepository,
@@ -107,9 +98,6 @@ public class AnalysisService {
     }
 
     private AnalysisExecution createExecution(Long incidentId) {
-        if (analysisExecutionRepository == null) {
-            return AnalysisExecution.create(incidentId);
-        }
         return analysisExecutionRepository.save(AnalysisExecution.create(incidentId));
     }
 
