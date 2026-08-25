@@ -19,6 +19,7 @@ import java.util.Comparator;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -88,10 +89,20 @@ public class AnalysisService {
                     bestCandidate
             );
         } catch (RuntimeException ex) {
-            if (execution != null) {
-                execution.fail(ex.getMessage());
-            }
+            persistFailure(execution, ex);
             throw ex;
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void persistFailure(AnalysisExecution execution, RuntimeException ex) {
+        if (execution == null) {
+            return;
+        }
+
+        execution.fail(ex.getMessage());
+        if (analysisExecutionRepository != null) {
+            analysisExecutionRepository.save(execution);
         }
     }
 

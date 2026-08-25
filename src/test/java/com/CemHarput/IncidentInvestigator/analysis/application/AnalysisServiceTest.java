@@ -137,4 +137,23 @@ class AnalysisServiceTest {
         assertThat(result.status()).isEqualTo("INCONCLUSIVE");
         assertThat(result.rootCause()).isEqualTo("UNKNOWN");
     }
+
+    @Test
+    void persistFailure_shouldWriteFailedExecutionBeforeRethrowingRuntimeException() {
+        AnalysisExecution execution = AnalysisExecution.create(42L);
+        execution.start();
+
+        IncidentRepository repository = mock(IncidentRepository.class);
+        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
+        when(executionRepository.save(any(AnalysisExecution.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        AnalysisService service = new AnalysisService(repository, executionRepository, mock(IncidentAnalyzerClient.class));
+
+        RuntimeException ex = new RuntimeException("Python unavailable");
+        service.persistFailure(execution, ex);
+
+        assertThat(execution.getStatus()).isEqualTo(AnalysisExecutionStatus.FAILED);
+        assertThat(execution.getFailureReason()).isEqualTo("Python unavailable");
+        verify(executionRepository).save(execution);
+    }
 }
