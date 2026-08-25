@@ -3,6 +3,7 @@ package com.CemHarput.IncidentInvestigator.analysis.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -18,6 +19,7 @@ import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateRespons
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -184,6 +186,86 @@ class AnalysisServiceTest {
     }
 
     @Test
+    void analyzeIncident_shouldNotMarkCompletedExecutionFailedWhenObservabilityFails() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+
+        RootCauseCandidateResponse bestCandidate = candidate(0.91d);
+        IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
+        when(client.analyze(REQUEST))
+                .thenReturn(new AnalysisResponse(42L, List.of(bestCandidate)));
+        MeterRegistry meterRegistry = failingMeterRegistry("completed");
+
+        AnalysisResultResponse result = service(
+                persistenceService,
+                client,
+                meterRegistry,
+                2
+        ).analyzeIncident(42L);
+
+        assertThat(result.status()).isEqualTo("ROOT_CAUSE_IDENTIFIED");
+        verify(persistenceService).completeAnalysis(99L, bestCandidate);
+        verify(persistenceService, never()).persistFailure(any(), any(), any());
+    }
+
+    @Test
+    void analyzeIncident_shouldNotMarkInconclusiveExecutionFailedWhenObservabilityFails() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+
+        RootCauseCandidateResponse unknownCandidate = new RootCauseCandidateResponse(
+                "UNKNOWN",
+                0.05d,
+                "Available evidence is insufficient.",
+                List.of()
+        );
+        IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
+        when(client.analyze(REQUEST))
+                .thenReturn(new AnalysisResponse(42L, List.of(unknownCandidate)));
+        MeterRegistry meterRegistry = failingMeterRegistry("inconclusive");
+
+        AnalysisResultResponse result = service(
+                persistenceService,
+                client,
+                meterRegistry,
+                2
+        ).analyzeIncident(42L);
+
+        assertThat(result.status()).isEqualTo("INCONCLUSIVE");
+        verify(persistenceService).markInconclusive(99L, 0.05d);
+        verify(persistenceService, never()).persistFailure(any(), any(), any());
+    }
+
+    @Test
+    void analyzeIncident_shouldKeepOriginalFailureWhenFailurePersistenceAlsoFails() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+
+        AnalyzerUnavailableException originalFailure = new AnalyzerUnavailableException(
+                "Incident analyzer service is unavailable",
+                AnalysisExecutionFailureType.CONNECTION_FAILURE,
+                new RuntimeException()
+        );
+        RuntimeException persistenceFailure = new RuntimeException("Database unavailable");
+        IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
+        when(client.analyze(REQUEST)).thenThrow(originalFailure);
+        doThrow(persistenceFailure)
+                .when(persistenceService)
+                .persistFailure(
+                        99L,
+                        originalFailure.getMessage(),
+                        AnalysisExecutionFailureType.CONNECTION_FAILURE
+                );
+
+        assertThatThrownBy(() -> service(persistenceService, client, 1).analyzeIncident(42L))
+                .isSameAs(originalFailure)
+                .satisfies(ex -> assertThat(ex.getSuppressed()).containsExactly(persistenceFailure));
+    }
+
+    @Test
     void inconclusive_shouldKeepAnalyzerConfidenceValue() {
         RootCauseCandidateResponse candidate = new RootCauseCandidateResponse(
                 "UNKNOWN",
@@ -205,13 +287,34 @@ class AnalysisServiceTest {
             IncidentAnalyzerClient client,
             int maxAttempts
     ) {
-        return new AnalysisService(
+        return service(
                 persistenceService,
                 client,
                 new SimpleMeterRegistry(),
+                maxAttempts
+        );
+    }
+
+    private AnalysisService service(
+            AnalysisPersistenceService persistenceService,
+            IncidentAnalyzerClient client,
+            MeterRegistry meterRegistry,
+            int maxAttempts
+    ) {
+        return new AnalysisService(
+                persistenceService,
+                client,
+                meterRegistry,
                 maxAttempts,
                 Duration.ZERO
         );
+    }
+
+    private MeterRegistry failingMeterRegistry(String outcome) {
+        MeterRegistry meterRegistry = mock(MeterRegistry.class);
+        when(meterRegistry.counter("incident.analysis.executions", "outcome", outcome))
+                .thenThrow(new RuntimeException("Metrics backend unavailable"));
+        return meterRegistry;
     }
 
     private RootCauseCandidateResponse candidate(double confidence) {

@@ -49,51 +49,26 @@ public class AnalysisService {
         Long executionId = preparation.executionId();
         long startedAt = System.nanoTime();
         AttemptTracker attemptTracker = new AttemptTracker();
+        RootCauseCandidateResponse bestCandidate;
+        boolean inconclusive;
 
         try {
             AnalysisResponse response = analyzeWithRetry(preparation, attemptTracker);
             validateResponse(incidentId, response);
 
-            RootCauseCandidateResponse bestCandidate = selectBestCandidate(response);
+            bestCandidate = selectBestCandidate(response);
+            inconclusive = isInconclusive(bestCandidate);
 
-            if (isInconclusive(bestCandidate)) {
+            if (inconclusive) {
                 persistenceService.markInconclusive(executionId, bestCandidate.confidence());
-                recordOutcome("inconclusive", startedAt);
-                logFinished(
-                        executionId,
-                        incidentId,
-                        "INCONCLUSIVE",
-                        attemptTracker.count,
-                        null,
-                        startedAt
-                );
-                return AnalysisResultResponse.inconclusive(
-                        executionId,
-                        incidentId,
-                        bestCandidate
-                );
+            } else {
+                persistenceService.completeAnalysis(executionId, bestCandidate);
             }
-
-            persistenceService.completeAnalysis(executionId, bestCandidate);
-            recordOutcome("completed", startedAt);
-            logFinished(
-                    executionId,
-                    incidentId,
-                    "COMPLETED",
-                    attemptTracker.count,
-                    null,
-                    startedAt
-            );
-            return AnalysisResultResponse.identified(
-                    executionId,
-                    incidentId,
-                    bestCandidate
-            );
         } catch (RuntimeException ex) {
             AnalysisExecutionFailureType failureType = classifyFailure(ex);
-            persistenceService.persistFailure(executionId, failureReason(ex), failureType);
-            recordOutcome("failed", startedAt);
-            logFinished(
+            persistFailurePreservingOriginal(executionId, ex, failureType);
+            observeOutcomeBestEffort(
+                    "failed",
                     executionId,
                     incidentId,
                     "FAILED",
@@ -103,6 +78,38 @@ public class AnalysisService {
             );
             throw ex;
         }
+
+        if (inconclusive) {
+            observeOutcomeBestEffort(
+                    "inconclusive",
+                    executionId,
+                    incidentId,
+                    "INCONCLUSIVE",
+                    attemptTracker.count,
+                    null,
+                    startedAt
+            );
+            return AnalysisResultResponse.inconclusive(
+                    executionId,
+                    incidentId,
+                    bestCandidate
+            );
+        }
+
+        observeOutcomeBestEffort(
+                "completed",
+                executionId,
+                incidentId,
+                "COMPLETED",
+                attemptTracker.count,
+                null,
+                startedAt
+        );
+        return AnalysisResultResponse.identified(
+                executionId,
+                incidentId,
+                bestCandidate
+        );
     }
 
     private AnalysisResponse analyzeWithRetry(
@@ -169,6 +176,53 @@ public class AnalysisService {
 
     private String failureReason(RuntimeException ex) {
         return ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+    }
+
+    private void persistFailurePreservingOriginal(
+            Long executionId,
+            RuntimeException originalException,
+            AnalysisExecutionFailureType failureType
+    ) {
+        try {
+            persistenceService.persistFailure(
+                    executionId,
+                    failureReason(originalException),
+                    failureType
+            );
+        } catch (RuntimeException persistenceException) {
+            if (persistenceException != originalException) {
+                originalException.addSuppressed(persistenceException);
+            }
+        }
+    }
+
+    private void observeOutcomeBestEffort(
+            String outcome,
+            Long executionId,
+            Long incidentId,
+            String status,
+            int attemptCount,
+            AnalysisExecutionFailureType failureType,
+            long startedAt
+    ) {
+        try {
+            recordOutcome(outcome, startedAt);
+            logFinished(
+                    executionId,
+                    incidentId,
+                    status,
+                    attemptCount,
+                    failureType,
+                    startedAt
+            );
+        } catch (RuntimeException ex) {
+            LOGGER.warn(
+                    "Failed to record analysis observability executionId={} status={}",
+                    executionId,
+                    status,
+                    ex
+            );
+        }
     }
 
     private void recordOutcome(String outcome, long startedAt) {
