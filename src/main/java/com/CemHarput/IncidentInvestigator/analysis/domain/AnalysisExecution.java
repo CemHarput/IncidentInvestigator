@@ -41,8 +41,15 @@ public class AnalysisExecution {
     @Column(name = "selected_confidence")
     private Double selectedConfidence;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "failure_type")
+    private AnalysisExecutionFailureType failureType;
+
     @Column(name = "failure_reason", columnDefinition = "TEXT")
     private String failureReason;
+
+    @Column(name = "attempt_count", nullable = false)
+    private Integer attemptCount = 0;
 
     @Column(name = "duration_ms")
     private Long durationMs;
@@ -67,6 +74,7 @@ public class AnalysisExecution {
         }
         this.status = AnalysisExecutionStatus.RUNNING;
         this.startedAt = LocalDateTime.now();
+        this.attemptCount = 1;
     }
 
     public void complete(String rootCause, double confidence) {
@@ -92,13 +100,23 @@ public class AnalysisExecution {
     }
 
     public void fail(String reason) {
+        fail(reason, null);
+    }
+
+    public void fail(String reason, AnalysisExecutionFailureType failureType) {
         if (this.status == AnalysisExecutionStatus.COMPLETED || this.status == AnalysisExecutionStatus.INCONCLUSIVE) {
             throw new IllegalStateException("Completed executions cannot be marked as failed");
         }
         this.status = AnalysisExecutionStatus.FAILED;
         this.failureReason = reason;
+        this.failureType = failureType;
         this.completedAt = LocalDateTime.now();
+        this.attemptCount = this.attemptCount == null ? 1 : Math.max(this.attemptCount, 1);
         calculateDuration();
+    }
+
+    public void incrementAttemptCount() {
+        this.attemptCount = (this.attemptCount == null ? 0 : this.attemptCount) + 1;
     }
 
     private void calculateDuration() {
@@ -146,8 +164,20 @@ public class AnalysisExecution {
         return selectedConfidence;
     }
 
+    public AnalysisExecutionFailureType getFailureType() {
+        return failureType;
+    }
+
     public String getFailureReason() {
         return failureReason;
+    }
+
+    public Integer getAttemptCount() {
+        return attemptCount;
+    }
+
+    public void setAttemptCount(Integer attemptCount) {
+        this.attemptCount = attemptCount;
     }
 
     public Long getDurationMs() {

@@ -106,8 +106,15 @@ public class Incident {
         if (this.status != IncidentStatus.IN_INVESTIGATION) {
             throw new InvalidIncidentStateException("Incident must be under investigation before resolving");
         }
+        if (hasConfirmedRootCause()) {
+            throw new InvalidIncidentStateException("Confirmed root cause cannot be overwritten");
+        }
         this.rootCause = rootCause;
         touch();
+    }
+
+    public boolean hasConfirmedRootCause() {
+        return this.rootCause != null && this.rootCause.isConfirmed();
     }
 
     public void resolve() {

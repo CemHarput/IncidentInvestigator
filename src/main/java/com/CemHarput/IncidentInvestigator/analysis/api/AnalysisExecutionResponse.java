@@ -9,6 +9,9 @@ public record AnalysisExecutionResponse(
         String status,
         String selectedRootCause,
         Double selectedConfidence,
+        String failureType,
+        String failureReason,
+        Integer attemptCount,
         LocalDateTime startedAt,
         LocalDateTime completedAt,
         Long durationMs
@@ -21,6 +24,9 @@ public record AnalysisExecutionResponse(
                 execution.getStatus().name(),
                 execution.getSelectedRootCause(),
                 execution.getSelectedConfidence(),
+                execution.getFailureType() == null ? null : execution.getFailureType().name(),
+                execution.getFailureReason(),
+                execution.getAttemptCount(),
                 execution.getStartedAt(),
                 execution.getCompletedAt(),
                 execution.getDurationMs()

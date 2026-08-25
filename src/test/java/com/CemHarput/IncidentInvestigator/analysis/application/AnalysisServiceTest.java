@@ -5,120 +5,182 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.CemHarput.IncidentInvestigator.analysis.api.AnalysisResultResponse;
 import com.CemHarput.IncidentInvestigator.analysis.client.IncidentAnalyzerClient;
-import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecution;
-import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionStatus;
+import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionFailureType;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisRequest;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateResponse;
-import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
-import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecutionRepository;
-import com.CemHarput.IncidentInvestigator.incident.domain.Evidence;
-import com.CemHarput.IncidentInvestigator.incident.domain.EvidenceType;
-import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
-import com.CemHarput.IncidentInvestigator.incident.domain.IncidentStatus;
-import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
-import java.time.LocalDateTime;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class AnalysisServiceTest {
 
-    @Test
-    void analyzeIncident_shouldAttachBestCandidateWhenConfidenceAboveThreshold() {
-        Incident incident = new Incident(
+    private static final AnalysisRequest REQUEST = new AnalysisRequest(
+            42L,
                 "Payment service latency",
-                "Database connection pool exhausted",
                 "LATENCY",
-                "MONITORING"
+            List.of()
         );
-        incident.startInvestigation();
-        incident.addEvidence(new Evidence(
-                EvidenceType.LOG,
-                "payment-service",
-                "HikariPool - Connection is not available",
-                LocalDateTime.of(2026, 8, 24, 12, 0, 0)
-        ));
-        incident.addEvidence(new Evidence(
-                EvidenceType.METRIC,
-                "payment-service",
-                "db_connection_pool_usage=100",
-                LocalDateTime.of(2026, 8, 24, 12, 1, 0)
-        ));
 
-        IncidentRepository repository = mock(IncidentRepository.class);
-        when(repository.findById(42L)).thenReturn(Optional.of(incident));
+    @Test
+    void analyzeIncident_shouldPersistBestCandidateWhenConfidenceAboveThreshold() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
 
         IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
-        when(client.analyze(any(AnalysisRequest.class))).thenReturn(new AnalysisResponse(
+        RootCauseCandidateResponse bestCandidate = candidate(0.91d);
+        when(client.analyze(REQUEST)).thenReturn(new AnalysisResponse(
                 42L,
-                List.of(
-                        new RootCauseCandidateResponse(
-                                "DATABASE_CONNECTION_POOL_EXHAUSTION",
-                                0.40,
-                                "Weak match",
-                                List.of("db_connection_pool_usage=100")
-                        ),
-                        new RootCauseCandidateResponse(
-                                "DATABASE_CONNECTION_POOL_EXHAUSTION",
-                                0.91,
-                                "Database connection pool saturation matches the observed timeout symptoms.",
-                                List.of(
-                                        "HikariPool - Connection is not available",
-                                        "db_connection_pool_usage=100"
-                                )
-                        )
-                )
+                List.of(candidate(0.40d), bestCandidate)
         ));
 
-        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
-        when(executionRepository.save(any(AnalysisExecution.class))).thenAnswer(invocation -> {
-            AnalysisExecution execution = invocation.getArgument(0);
-            execution.setId(99L);
-            return execution;
-        });
-
-        AnalysisService service = new AnalysisService(repository, executionRepository, client);
+        AnalysisService service = service(persistenceService, client, 2);
 
         AnalysisResultResponse result = service.analyzeIncident(42L);
 
         assertThat(result.executionId()).isEqualTo(99L);
         assertThat(result.status()).isEqualTo("ROOT_CAUSE_IDENTIFIED");
         assertThat(result.rootCause()).isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
-        assertThat(incident.getRootCause()).isNotNull();
-        assertThat(incident.getRootCause().getRootCauseType()).isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
-        assertThat(incident.getRootCause().isConfirmed()).isFalse();
-        assertThat(incident.getStatus()).isEqualTo(IncidentStatus.IN_INVESTIGATION);
-        verify(executionRepository).save(any(AnalysisExecution.class));
+        verify(persistenceService).completeAnalysis(99L, bestCandidate);
+        verify(persistenceService, never()).persistFailure(any(), any(), any());
     }
 
     @Test
-    void analyzeIncident_shouldRejectOpenIncident() {
-        Incident incident = new Incident(
-                "Payment service latency",
-                "Database connection pool exhausted",
-                "LATENCY",
-                "MONITORING"
-        );
-
-        IncidentRepository repository = mock(IncidentRepository.class);
-        when(repository.findById(42L)).thenReturn(Optional.of(incident));
+    void analyzeIncident_shouldRetryTimeoutOnceAndTrackSecondAttempt() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
 
         IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
-        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
-        AnalysisService service = new AnalysisService(repository, executionRepository, client);
+        when(client.analyze(REQUEST))
+                .thenThrow(new AnalyzerUnavailableException(
+                        "Incident analyzer request timed out",
+                        AnalysisExecutionFailureType.TIMEOUT,
+                        new RuntimeException()
+                ))
+                .thenReturn(new AnalysisResponse(42L, List.of(candidate(0.91d))));
+
+        AnalysisService service = service(persistenceService, client, 2);
+
+        AnalysisResultResponse result = service.analyzeIncident(42L);
+
+        assertThat(result.status()).isEqualTo("ROOT_CAUSE_IDENTIFIED");
+        verify(client, times(2)).analyze(REQUEST);
+        verify(persistenceService).incrementAttemptCount(99L);
+        verify(persistenceService, never()).persistFailure(any(), any(), any());
+    }
+
+    @Test
+    void analyzeIncident_shouldPersistFailureAfterTransientRetriesAreExhausted() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+
+        AnalyzerDownstreamException failure = new AnalyzerDownstreamException(
+                "Incident analyzer returned status 503",
+                503,
+                new RuntimeException()
+        );
+        IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
+        when(client.analyze(REQUEST)).thenThrow(failure);
+
+        AnalysisService service = service(persistenceService, client, 2);
+
+        assertThatThrownBy(() -> service.analyzeIncident(42L)).isSameAs(failure);
+
+        verify(client, times(2)).analyze(REQUEST);
+        verify(persistenceService).incrementAttemptCount(99L);
+        verify(persistenceService).persistFailure(
+                99L,
+                failure.getMessage(),
+                AnalysisExecutionFailureType.DOWNSTREAM_5XX
+        );
+    }
+
+    @Test
+    void analyzeIncident_shouldNotRetryDownstream4xx() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+
+        InvalidAnalyzerRequestException failure = new InvalidAnalyzerRequestException(
+                "Incident analyzer rejected request with status 422",
+                new RuntimeException()
+        );
+        IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
+        when(client.analyze(REQUEST)).thenThrow(failure);
+
+        AnalysisService service = service(persistenceService, client, 2);
+
+        assertThatThrownBy(() -> service.analyzeIncident(42L)).isSameAs(failure);
+
+        verify(client).analyze(REQUEST);
+        verify(persistenceService, never()).incrementAttemptCount(any());
+        verify(persistenceService).persistFailure(
+                99L,
+                failure.getMessage(),
+                AnalysisExecutionFailureType.DOWNSTREAM_4XX
+        );
+    }
+
+    @Test
+    void analyzeIncident_shouldNotRetryNonTransientDownstream5xx() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+
+        AnalyzerDownstreamException failure = new AnalyzerDownstreamException(
+                "Incident analyzer returned status 500",
+                500,
+                new RuntimeException()
+        );
+        IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
+        when(client.analyze(REQUEST)).thenThrow(failure);
+
+        AnalysisService service = service(persistenceService, client, 2);
+
+        assertThatThrownBy(() -> service.analyzeIncident(42L)).isSameAs(failure);
+
+        verify(client).analyze(REQUEST);
+        verify(persistenceService, never()).incrementAttemptCount(any());
+        verify(persistenceService).persistFailure(
+                99L,
+                failure.getMessage(),
+                AnalysisExecutionFailureType.DOWNSTREAM_5XX
+        );
+    }
+
+    @Test
+    void analyzeIncident_shouldMapInvalidResponseToNonRetryableFailure() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+
+        IncidentAnalyzerClient client = mock(IncidentAnalyzerClient.class);
+        when(client.analyze(REQUEST)).thenReturn(null);
+
+        AnalysisService service = service(persistenceService, client, 2);
 
         assertThatThrownBy(() -> service.analyzeIncident(42L))
-                .isInstanceOf(AnalysisNotAllowedException.class)
-                .hasMessage("Only incidents under investigation can be analyzed");
+                .hasMessage("Analyzer returned an empty response");
 
-        verify(client, never()).analyze(any(AnalysisRequest.class));
-        verify(executionRepository, never()).save(any(AnalysisExecution.class));
+        verify(client).analyze(REQUEST);
+        verify(persistenceService).persistFailure(
+                99L,
+                "Analyzer returned an empty response",
+                AnalysisExecutionFailureType.INVALID_RESPONSE
+        );
     }
 
     @Test
@@ -138,22 +200,26 @@ class AnalysisServiceTest {
         assertThat(result.rootCause()).isEqualTo("UNKNOWN");
     }
 
-    @Test
-    void persistFailure_shouldWriteFailedExecutionBeforeRethrowingRuntimeException() {
-        AnalysisExecution execution = AnalysisExecution.create(42L);
-        execution.start();
+    private AnalysisService service(
+            AnalysisPersistenceService persistenceService,
+            IncidentAnalyzerClient client,
+            int maxAttempts
+    ) {
+        return new AnalysisService(
+                persistenceService,
+                client,
+                new SimpleMeterRegistry(),
+                maxAttempts,
+                Duration.ZERO
+        );
+    }
 
-        IncidentRepository repository = mock(IncidentRepository.class);
-        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
-        when(executionRepository.save(any(AnalysisExecution.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        AnalysisService service = new AnalysisService(repository, executionRepository, mock(IncidentAnalyzerClient.class));
-
-        RuntimeException ex = new RuntimeException("Python unavailable");
-        service.persistFailure(execution, ex);
-
-        assertThat(execution.getStatus()).isEqualTo(AnalysisExecutionStatus.FAILED);
-        assertThat(execution.getFailureReason()).isEqualTo("Python unavailable");
-        verify(executionRepository).save(execution);
+    private RootCauseCandidateResponse candidate(double confidence) {
+        return new RootCauseCandidateResponse(
+                "DATABASE_CONNECTION_POOL_EXHAUSTION",
+                confidence,
+                "Database connection pool saturation matches the observed timeout symptoms.",
+                List.of("db_connection_pool_usage=100")
+        );
     }
 }

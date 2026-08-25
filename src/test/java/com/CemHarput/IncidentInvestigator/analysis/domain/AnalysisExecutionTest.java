@@ -46,4 +46,28 @@ class AnalysisExecutionTest {
         assertThatThrownBy(() -> execution.complete("Y", 0.90d))
                 .isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void shouldStoreFailureTypeAndAttemptCount() {
+        AnalysisExecution execution = AnalysisExecution.create(42L);
+        execution.start();
+
+        execution.fail("Read timed out", AnalysisExecutionFailureType.TIMEOUT);
+
+        assertThat(execution.getStatus()).isEqualTo(AnalysisExecutionStatus.FAILED);
+        assertThat(execution.getFailureType()).isEqualTo(AnalysisExecutionFailureType.TIMEOUT);
+        assertThat(execution.getAttemptCount()).isEqualTo(1);
+        assertThat(execution.getFailureReason()).isEqualTo("Read timed out");
+    }
+
+    @Test
+    void shouldIncrementAttemptCountWhenRetried() {
+        AnalysisExecution execution = AnalysisExecution.create(42L);
+        execution.start();
+        execution.fail("Temporary network issue", AnalysisExecutionFailureType.CONNECTION_FAILURE);
+
+        execution.incrementAttemptCount();
+
+        assertThat(execution.getAttemptCount()).isEqualTo(2);
+    }
 }

@@ -1,7 +1,10 @@
 package com.CemHarput.IncidentInvestigator.common.exception;
 
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisAlreadyRunningException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResponseException;
 import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundException;
 import com.CemHarput.IncidentInvestigator.incident.exception.InvalidIncidentStateException;
@@ -49,6 +52,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
     }
 
+    @ExceptionHandler(AnalysisAlreadyRunningException.class)
+    public ResponseEntity<ApiError> handleAnalysisAlreadyRunning(AnalysisAlreadyRunningException ex) {
+        ApiError error = new ApiError(
+                "ANALYSIS_ALREADY_RUNNING",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
     @ExceptionHandler(AnalyzerUnavailableException.class)
     public ResponseEntity<ApiError> handleAnalyzerUnavailable(AnalyzerUnavailableException ex) {
         ApiError error = new ApiError(
@@ -58,6 +72,17 @@ public class GlobalExceptionHandler {
         );
 
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+    }
+
+    @ExceptionHandler({AnalyzerDownstreamException.class, InvalidAnalyzerRequestException.class})
+    public ResponseEntity<ApiError> handleAnalyzerDownstream(RuntimeException ex) {
+        ApiError error = new ApiError(
+                "ANALYZER_DOWNSTREAM_ERROR",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error);
     }
 
     @ExceptionHandler(InvalidAnalyzerResponseException.class)

@@ -2,135 +2,203 @@ package com.CemHarput.IncidentInvestigator.analysis.application;
 
 import com.CemHarput.IncidentInvestigator.analysis.api.AnalysisResultResponse;
 import com.CemHarput.IncidentInvestigator.analysis.client.IncidentAnalyzerClient;
-import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecution;
-import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisEvidence;
+import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionFailureType;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisRequest;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateResponse;
-import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResponseException;
-import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecutionRepository;
-import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
-import com.CemHarput.IncidentInvestigator.incident.domain.IncidentStatus;
-import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
-import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundException;
-import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import java.util.Comparator;
-import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@Transactional
 public class AnalysisService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisService.class);
     private static final double MIN_CONFIDENCE = 0.60d;
 
-    private final IncidentRepository incidentRepository;
-    private final AnalysisExecutionRepository analysisExecutionRepository;
+    private final AnalysisPersistenceService persistenceService;
     private final IncidentAnalyzerClient analyzerClient;
+    private final MeterRegistry meterRegistry;
+    private final int maxAttempts;
+    private final Duration retryBackoff;
 
     public AnalysisService(
-            IncidentRepository incidentRepository,
-            AnalysisExecutionRepository analysisExecutionRepository,
-            IncidentAnalyzerClient analyzerClient
+            AnalysisPersistenceService persistenceService,
+            IncidentAnalyzerClient analyzerClient,
+            MeterRegistry meterRegistry,
+            @Value("${incident-analyzer.retry.max-attempts:2}") int maxAttempts,
+            @Value("${incident-analyzer.retry.backoff:100ms}") Duration retryBackoff
     ) {
-        this.incidentRepository = incidentRepository;
-        this.analysisExecutionRepository = analysisExecutionRepository;
+        this.persistenceService = persistenceService;
         this.analyzerClient = analyzerClient;
+        this.meterRegistry = meterRegistry;
+        this.maxAttempts = Math.max(maxAttempts, 1);
+        this.retryBackoff = retryBackoff;
     }
 
     public AnalysisResultResponse analyzeIncident(Long incidentId) {
-        Incident incident = incidentRepository.findById(incidentId)
-                .orElseThrow(() -> new IncidentNotFoundException(incidentId));
-
-        validateAnalysisAllowed(incident);
-
-        AnalysisExecution execution = createExecution(incidentId);
-        execution.start();
+        AnalysisPreparation preparation = persistenceService.beginAnalysis(incidentId);
+        Long executionId = preparation.executionId();
+        long startedAt = System.nanoTime();
+        AttemptTracker attemptTracker = new AttemptTracker();
 
         try {
-            AnalysisRequest request = toAnalysisRequest(incident);
-            AnalysisResponse response = analyzerClient.analyze(request);
+            AnalysisResponse response = analyzeWithRetry(preparation, attemptTracker);
             validateResponse(incidentId, response);
 
             RootCauseCandidateResponse bestCandidate = selectBestCandidate(response);
 
             if (isInconclusive(bestCandidate)) {
-                execution.markInconclusive(bestCandidate.confidence());
+                persistenceService.markInconclusive(executionId, bestCandidate.confidence());
+                recordOutcome("inconclusive", startedAt);
+                logFinished(
+                        executionId,
+                        incidentId,
+                        "INCONCLUSIVE",
+                        attemptTracker.count,
+                        null,
+                        startedAt
+                );
                 return AnalysisResultResponse.inconclusive(
-                        execution.getId(),
+                        executionId,
                         incidentId,
                         bestCandidate
                 );
             }
 
-            incident.identifyRootCause(new RootCause(
-                    bestCandidate.explanation(),
-                    bestCandidate.rootCause(),
-                    false
-            ));
-
-            execution.complete(bestCandidate.rootCause(), bestCandidate.confidence());
-
+            persistenceService.completeAnalysis(executionId, bestCandidate);
+            recordOutcome("completed", startedAt);
+            logFinished(
+                    executionId,
+                    incidentId,
+                    "COMPLETED",
+                    attemptTracker.count,
+                    null,
+                    startedAt
+            );
             return AnalysisResultResponse.identified(
-                    execution.getId(),
+                    executionId,
                     incidentId,
                     bestCandidate
             );
         } catch (RuntimeException ex) {
-            persistFailure(execution, ex);
+            AnalysisExecutionFailureType failureType = classifyFailure(ex);
+            persistenceService.persistFailure(executionId, failureReason(ex), failureType);
+            recordOutcome("failed", startedAt);
+            logFinished(
+                    executionId,
+                    incidentId,
+                    "FAILED",
+                    attemptTracker.count,
+                    failureType,
+                    startedAt
+            );
             throw ex;
         }
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void persistFailure(AnalysisExecution execution, RuntimeException ex) {
-        if (execution == null) {
-            return;
+    private AnalysisResponse analyzeWithRetry(
+            AnalysisPreparation preparation,
+            AttemptTracker attemptTracker
+    ) {
+        AnalysisRequest request = preparation.request();
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            attemptTracker.count = attempt;
+            try {
+                return analyzerClient.analyze(request);
+            } catch (RuntimeException ex) {
+                if (!isRetryable(ex) || attempt == maxAttempts) {
+                    throw ex;
         }
 
-        execution.fail(ex.getMessage());
-        if (analysisExecutionRepository != null) {
-            analysisExecutionRepository.save(execution);
-        }
-    }
-
-    private AnalysisExecution createExecution(Long incidentId) {
-        return analysisExecutionRepository.save(AnalysisExecution.create(incidentId));
-    }
-
-    private void validateAnalysisAllowed(Incident incident) {
-        if (incident.getStatus() != IncidentStatus.IN_INVESTIGATION) {
-            throw new AnalysisNotAllowedException(
-                    "Only incidents under investigation can be analyzed"
-            );
-        }
-
-        if (incident.getEvidence().isEmpty()) {
-            throw new AnalysisNotAllowedException(
-                    "Incident must contain evidence before analysis"
-            );
+                LOGGER.warn(
+                        "Retrying incident analysis executionId={} incidentId={} nextAttempt={} failureType={}",
+                        preparation.executionId(),
+                        request.incidentId(),
+                        attempt + 1,
+                        classifyFailure(ex)
+                );
+                waitBeforeRetry();
+                persistenceService.incrementAttemptCount(preparation.executionId());
         }
     }
 
-    private AnalysisRequest toAnalysisRequest(Incident incident) {
-        List<AnalysisEvidence> evidence = incident.getEvidence().stream()
-                .map(item -> new AnalysisEvidence(
-                        item.getType().name(),
-                        item.getSource(),
-                        item.getContent(),
-                        item.getObservedAt()
-                ))
-                .toList();
+        throw new IllegalStateException("Analysis retry loop ended unexpectedly");
+    }
 
-        return new AnalysisRequest(
-                incident.getId(),
-                incident.getTitle(),
-                incident.getIncidentType(),
-                evidence
+    private void waitBeforeRetry() {
+        try {
+            Thread.sleep(retryBackoff);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Analysis retry was interrupted", ex);
+        }
+        }
+
+    private boolean isRetryable(RuntimeException ex) {
+        if (ex instanceof AnalyzerUnavailableException) {
+            return true;
+        }
+        return ex instanceof AnalyzerDownstreamException downstream && downstream.isRetryable();
+    }
+
+    private AnalysisExecutionFailureType classifyFailure(RuntimeException ex) {
+        if (ex instanceof AnalyzerUnavailableException unavailable) {
+            return unavailable.getFailureType();
+        }
+        if (ex instanceof InvalidAnalyzerRequestException) {
+            return AnalysisExecutionFailureType.DOWNSTREAM_4XX;
+        }
+        if (ex instanceof AnalyzerDownstreamException) {
+            return AnalysisExecutionFailureType.DOWNSTREAM_5XX;
+        }
+        if (ex instanceof InvalidAnalyzerResponseException) {
+            return AnalysisExecutionFailureType.INVALID_RESPONSE;
+        }
+        return AnalysisExecutionFailureType.INTERNAL_ERROR;
+    }
+
+    private String failureReason(RuntimeException ex) {
+        return ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+    }
+
+    private void recordOutcome(String outcome, long startedAt) {
+        meterRegistry.counter("incident.analysis.executions", "outcome", outcome).increment();
+        meterRegistry.timer("incident.analysis.duration", "outcome", outcome)
+                .record(Duration.ofNanos(System.nanoTime() - startedAt));
+    }
+
+    private void logFinished(
+            Long executionId,
+            Long incidentId,
+            String status,
+            int attemptCount,
+            AnalysisExecutionFailureType failureType,
+            long startedAt
+    ) {
+        long durationMs = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+        LOGGER.info(
+                "Incident analysis finished executionId={} incidentId={} status={} attemptCount={} durationMs={} failureType={}",
+                executionId,
+                incidentId,
+                status,
+                attemptCount,
+                durationMs,
+                failureType
         );
+    }
+
+    private static final class AttemptTracker {
+        private int count;
     }
 
     private void validateResponse(Long expectedIncidentId, AnalysisResponse response) {
