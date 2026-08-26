@@ -1,18 +1,17 @@
 # IncidentInvestigator
 
-IncidentInvestigator is a Spring Boot service for managing operational incidents, collecting investigation evidence, and recording root-cause analysis executions. It supports both synchronous analysis over HTTP and asynchronous analysis over Kafka.
+IncidentInvestigator is a Spring Boot service for managing operational incidents, collecting investigation evidence, and coordinating asynchronous root-cause analysis over Kafka.
 
 ## Architecture
 
 The application is a modular monolith organized around two business modules:
 
 - `incident` owns the incident lifecycle, evidence, and root cause.
-- `analysis` coordinates analyzer calls, Kafka messages, execution history, retries, and result persistence.
+- `analysis` coordinates Kafka messages, execution history, retries, and result persistence.
 
 ```mermaid
 flowchart LR
     Client[API Client]
-    Analyzer[External Incident Analyzer]
     Worker[External Analysis Worker]
     Kafka[(Kafka)]
     PostgreSQL[(PostgreSQL)]
@@ -39,7 +38,6 @@ flowchart LR
 
     Client -->|HTTP /api/v1| IncidentAPI
     Client -->|HTTP /api/v1| AnalysisAPI
-    AnalysisService -->|POST /api/v1/analyze| Analyzer
     Publisher -->|incident.analysis.requested.v1| Kafka
     Kafka -->|analysis request| Worker
     Worker -->|completed or failed result| Kafka
@@ -47,7 +45,7 @@ flowchart LR
     Repositories --> PostgreSQL
 ```
 
-The external analyzer and asynchronous worker are integration boundaries; their implementations are not part of this repository.
+The asynchronous analysis worker is an integration boundary; its implementation is not part of this repository.
 
 ### Package Structure
 
@@ -61,8 +59,8 @@ com.CemHarput.IncidentInvestigator
 |   `-- infrastructure   # Spring Data repository
 |-- analysis
 |   |-- api              # Analysis endpoints and response records
-|   |-- application      # Sync/async orchestration and result evaluation
-|   |-- client           # HTTP analyzer adapter
+|   |-- application      # Analysis orchestration and result evaluation
+|   |-- client           # Benchmark-only synchronous analyzer adapter
 |   |-- domain           # AnalysisExecution state and failure model
 |   |-- dto
 |   |-- exception
@@ -91,20 +89,9 @@ The domain model enforces these rules:
 - Only a `RESOLVED` incident can be closed.
 - `Incident` owns `RootCause` and `Evidence`; JPA cascade and orphan removal persist them with the aggregate.
 
-### Analysis Flows
+### Asynchronous Analysis Flow
 
 Analysis is allowed only when the incident is under investigation, has at least one evidence item, and does not already have a confirmed root cause. Only one active (`CREATED`, `QUEUED`, or `RUNNING`) execution is allowed per incident.
-
-#### Synchronous Analysis
-
-1. `POST /api/v1/incidents/{id}/analyze` creates a `RUNNING` analysis execution.
-2. The service calls the external analyzer at `${incident-analyzer.base-url}/api/v1/analyze`.
-3. Retryable connection, timeout, and server failures are retried according to configuration.
-4. The highest-confidence candidate is selected.
-5. `UNKNOWN` or confidence below `0.60` produces `INCONCLUSIVE`; otherwise an unconfirmed root cause is attached and the execution becomes `COMPLETED`.
-6. Failures are classified and persisted as `FAILED` in a separate transaction.
-
-#### Asynchronous Analysis
 
 1. `POST /api/v1/incidents/{id}/analyze-async` commits a `QUEUED` execution.
 2. An `AnalysisRequestedEvent` is published to `incident.analysis.requested.v1`, keyed by incident ID.
@@ -114,6 +101,12 @@ Analysis is allowed only when the incident is under investigation, has at least 
 6. Consumer failures are attempted three times by default, then published to the source topic's `.DLT` topic.
 
 The database commit and Kafka publish in step 1/2 are not atomic. A process failure between them can leave a `QUEUED` execution without a request event. A transactional outbox is not currently implemented. A reported publish failure is persisted as `FAILED` with `MESSAGING_FAILURE` and returned as HTTP `503`.
+
+### Benchmark-only Synchronous Analysis
+
+The synchronous analysis path is retained only for comparative benchmark tests against the asynchronous Kafka flow. It is not part of the intended production architecture and is therefore omitted from the architecture diagram.
+
+`POST /api/v1/incidents/{id}/analyze` creates a `RUNNING` execution and calls `${incident-analyzer.base-url}/api/v1/analyze` directly over HTTP. Retryable connection, timeout, and server failures are retried according to configuration. The result evaluation rules are the same as for asynchronous results: the highest-confidence candidate is selected, and `UNKNOWN` or confidence below `0.60` produces an `INCONCLUSIVE` execution.
 
 ## Technology Stack
 
@@ -157,9 +150,9 @@ The application starts on `http://localhost:8080`. The default configuration exp
 
 - PostgreSQL at `localhost:5432` with database `incidentdb`.
 - Kafka at `localhost:9092`.
-- The optional synchronous analyzer at `http://localhost:8000`.
+- An external analysis worker that consumes requests and publishes results.
 
-The analyzer is required only when the synchronous analysis endpoint is invoked. An external worker is required to complete requests submitted through the asynchronous endpoint.
+The HTTP analyzer at `http://localhost:8000` is needed only when running synchronous-versus-asynchronous benchmark tests.
 
 Useful development URLs:
 
@@ -180,7 +173,7 @@ Useful development URLs:
 | `POST` | `/api/v1/incidents/{id}/root-cause` | Attach a root cause |
 | `POST` | `/api/v1/incidents/{id}/resolve` | Resolve an investigated incident |
 | `POST` | `/api/v1/incidents/{id}/close` | Close a resolved incident |
-| `POST` | `/api/v1/incidents/{id}/analyze` | Run synchronous root-cause analysis |
+| `POST` | `/api/v1/incidents/{id}/analyze` | Run synchronous analysis for comparative benchmarks only |
 | `POST` | `/api/v1/incidents/{id}/analyze-async` | Queue analysis and return `202 Accepted` |
 | `GET` | `/api/v1/incidents/{incidentId}/analyses` | List an incident's analysis executions |
 | `GET` | `/api/v1/analyses/{executionId}` | Poll an analysis execution |
@@ -203,11 +196,11 @@ The defaults are defined in `src/main/resources/application.properties`.
 
 | Property | Default | Description |
 | --- | --- | --- |
-| `incident-analyzer.base-url` | `http://localhost:8000` | Synchronous analyzer base URL |
-| `incident-analyzer.connect-timeout` | `2s` | Analyzer connection timeout |
-| `incident-analyzer.read-timeout` | `5s` | Analyzer response timeout |
-| `incident-analyzer.retry.max-attempts` | `2` | Total synchronous call attempts |
-| `incident-analyzer.retry.backoff` | `100ms` | Delay between attempts |
+| `incident-analyzer.base-url` | `http://localhost:8000` | Benchmark analyzer base URL |
+| `incident-analyzer.connect-timeout` | `2s` | Benchmark analyzer connection timeout |
+| `incident-analyzer.read-timeout` | `5s` | Benchmark analyzer response timeout |
+| `incident-analyzer.retry.max-attempts` | `2` | Total synchronous benchmark attempts |
+| `incident-analyzer.retry.backoff` | `100ms` | Delay between benchmark attempts |
 | `spring.kafka.bootstrap-servers` | `${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}` | Kafka brokers |
 | `analysis.kafka.requested-topic` | `incident.analysis.requested.v1` | Analysis request topic |
 | `analysis.kafka.completed-topic` | `incident.analysis.completed.v1` | Successful result topic |
