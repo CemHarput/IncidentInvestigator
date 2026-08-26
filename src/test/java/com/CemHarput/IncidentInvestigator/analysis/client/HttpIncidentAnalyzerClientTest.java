@@ -13,12 +13,15 @@ import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamE
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResponseException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.mock.http.client.MockClientHttpResponse;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
@@ -30,6 +33,32 @@ class HttpIncidentAnalyzerClientTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://analyzer/api/v1/analyze"))
                 .andRespond(withException(new SocketTimeoutException("Read timed out")));
+        HttpIncidentAnalyzerClient client = new HttpIncidentAnalyzerClient(builder, "http://analyzer");
+
+        assertThatThrownBy(() -> client.analyze(request()))
+                .isInstanceOfSatisfying(AnalyzerUnavailableException.class, ex -> {
+                    assertThat(ex.getFailureType()).isEqualTo(AnalysisExecutionFailureType.TIMEOUT);
+                    assertThat(ex.getMessage()).isEqualTo("Incident analyzer request timed out");
+                });
+        server.verify();
+    }
+
+    @Test
+    void analyze_shouldClassifyTimeoutWhileExtractingResponse() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("http://analyzer/api/v1/analyze"))
+                .andRespond(request -> {
+                    InputStream body = new InputStream() {
+                        @Override
+                        public int read() throws IOException {
+                            throw new SocketTimeoutException("Read timed out");
+                        }
+                    };
+                    MockClientHttpResponse response = new MockClientHttpResponse(body, HttpStatus.OK);
+                    response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                    return response;
+                });
         HttpIncidentAnalyzerClient client = new HttpIncidentAnalyzerClient(builder, "http://analyzer");
 
         assertThatThrownBy(() -> client.analyze(request()))

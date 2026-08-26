@@ -50,15 +50,21 @@ public class HttpIncidentAnalyzerClient implements IncidentAnalyzerClient {
                     ex.getStatusCode().value(),
                     ex
             );
-        } catch (ResourceAccessException ex) {
-            AnalysisExecutionFailureType failureType = isTimeout(ex)
-                    ? AnalysisExecutionFailureType.TIMEOUT
-                    : AnalysisExecutionFailureType.CONNECTION_FAILURE;
-            String message = failureType == AnalysisExecutionFailureType.TIMEOUT
-                    ? "Incident analyzer request timed out"
-                    : "Incident analyzer service is unavailable";
-            throw new AnalyzerUnavailableException(message, failureType, ex);
         } catch (RestClientException ex) {
+            if (isTimeout(ex)) {
+                throw new AnalyzerUnavailableException(
+                        "Incident analyzer request timed out",
+                        AnalysisExecutionFailureType.TIMEOUT,
+                        ex
+                );
+            }
+            if (ex instanceof ResourceAccessException) {
+                throw new AnalyzerUnavailableException(
+                        "Incident analyzer service is unavailable",
+                        AnalysisExecutionFailureType.CONNECTION_FAILURE,
+                        ex
+                );
+            }
             throw new InvalidAnalyzerResponseException(
                     "Incident analyzer returned an invalid response",
                     ex
