@@ -86,6 +86,7 @@ public class AnalysisExecution {
             throw new IllegalStateException("Only CREATED executions can be queued");
         }
         this.status = AnalysisExecutionStatus.QUEUED;
+        this.startedAt = LocalDateTime.now();
     }
 
     public void complete(String rootCause, double confidence) {
