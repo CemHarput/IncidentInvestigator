@@ -9,6 +9,18 @@ import org.junit.jupiter.api.Test;
 class AnalysisExecutionTest {
 
     @Test
+    void shouldTransitionFromCreatedToQueued() {
+        AnalysisExecution execution = AnalysisExecution.create(42L);
+
+        execution.queue();
+
+        assertThat(execution.getStatus()).isEqualTo(AnalysisExecutionStatus.QUEUED);
+        assertThatThrownBy(execution::queue)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Only CREATED executions can be queued");
+    }
+
+    @Test
     void shouldTransitionFromCreatedToRunningToCompleted() {
         AnalysisExecution execution = AnalysisExecution.create(42L);
 

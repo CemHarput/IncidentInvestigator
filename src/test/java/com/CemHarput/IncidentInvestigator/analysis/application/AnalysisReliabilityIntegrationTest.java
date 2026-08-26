@@ -3,6 +3,7 @@ package com.CemHarput.IncidentInvestigator.analysis.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import com.CemHarput.IncidentInvestigator.analysis.client.IncidentAnalyzerClient;
@@ -10,7 +11,9 @@ import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecution;
 import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionFailureType;
 import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionStatus;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingException;
 import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecutionRepository;
+import com.CemHarput.IncidentInvestigator.analysis.messaging.AnalysisEventPublisher;
 import com.CemHarput.IncidentInvestigator.incident.domain.Evidence;
 import com.CemHarput.IncidentInvestigator.incident.domain.EvidenceType;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
@@ -54,6 +57,9 @@ class AnalysisReliabilityIntegrationTest {
 
     @MockitoBean
     IncidentAnalyzerClient analyzerClient;
+
+    @MockitoBean
+    AnalysisEventPublisher eventPublisher;
 
     @DynamicPropertySource
     static void postgresProperties(DynamicPropertyRegistry registry) {
@@ -110,6 +116,50 @@ class AnalysisReliabilityIntegrationTest {
             assertThat(execution.getFailureType()).isEqualTo(AnalysisExecutionFailureType.TIMEOUT);
             assertThat(execution.getFailureReason()).isEqualTo("Incident analyzer request timed out");
             assertThat(execution.getAttemptCount()).isEqualTo(2);
+        });
+    }
+
+    @Test
+    void kafkaFailure_shouldRunPublishOutsideTransactionAndCommitClassifiedFailure() {
+        Incident incident = new Incident(
+                "Payment service latency",
+                "Database connection pool exhausted",
+                "LATENCY",
+                "MONITORING"
+        );
+        incident.startInvestigation();
+        incident.addEvidence(new Evidence(
+                EvidenceType.LOG,
+                "payment-service",
+                "HikariPool - Connection is not available",
+                LocalDateTime.of(2026, 8, 24, 12, 0)
+        ));
+        Long incidentId = incidentRepository.saveAndFlush(incident).getId();
+
+        AtomicBoolean transactionActiveDuringPublish = new AtomicBoolean(true);
+        AnalysisMessagingException publishFailure = new AnalysisMessagingException(
+                "Failed to publish analysis request",
+                new RuntimeException("Kafka unavailable")
+        );
+        doAnswer(invocation -> {
+            transactionActiveDuringPublish.set(
+                    TransactionSynchronizationManager.isActualTransactionActive()
+            );
+            throw publishFailure;
+        }).when(eventPublisher).publishAnalysisRequested(any());
+
+        assertThatThrownBy(() -> analysisService.analyzeIncidentAsync(incidentId))
+                .isSameAs(publishFailure);
+
+        List<AnalysisExecution> executions =
+                executionRepository.findByIncidentIdOrderByCreatedAtDesc(incidentId);
+        assertThat(transactionActiveDuringPublish).isFalse();
+        assertThat(executions).singleElement().satisfies(execution -> {
+            assertThat(execution.getStatus()).isEqualTo(AnalysisExecutionStatus.FAILED);
+            assertThat(execution.getFailureType())
+                    .isEqualTo(AnalysisExecutionFailureType.MESSAGING_FAILURE);
+            assertThat(execution.getFailureReason())
+                    .isEqualTo("Failed to publish analysis request");
         });
     }
 }

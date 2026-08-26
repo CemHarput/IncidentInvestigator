@@ -12,10 +12,12 @@ import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecution;
 import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionFailureType;
 import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionStatus;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisAlreadyRunningException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
 import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecutionRepository;
 import com.CemHarput.IncidentInvestigator.incident.domain.Evidence;
 import com.CemHarput.IncidentInvestigator.incident.domain.EvidenceType;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
+import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -30,9 +32,11 @@ class AnalysisPersistenceServiceTest {
         IncidentRepository incidentRepository = mock(IncidentRepository.class);
         AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
         when(incidentRepository.findByIdForAnalysis(42L)).thenReturn(Optional.of(incident()));
+        AnalysisExecution queuedExecution = AnalysisExecution.create(42L);
+        queuedExecution.queue();
         when(executionRepository.findFirstByIncidentIdAndStatusInOrderByCreatedAtDesc(
                 any(), any()
-        )).thenReturn(Optional.of(AnalysisExecution.create(42L)));
+        )).thenReturn(Optional.of(queuedExecution));
 
         AnalysisPersistenceService service = new AnalysisPersistenceService(
                 incidentRepository,
@@ -69,6 +73,101 @@ class AnalysisPersistenceServiceTest {
         assertThat(preparation.request().incidentId()).isEqualTo(42L);
         assertThat(preparation.request().evidence()).hasSize(1);
         verify(executionRepository).save(any(AnalysisExecution.class));
+    }
+
+    @Test
+    void beginAsyncAnalysis_shouldCreateQueuedExecutionAndRequestSnapshot() {
+        IncidentRepository incidentRepository = mock(IncidentRepository.class);
+        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
+        when(incidentRepository.findByIdForAnalysis(42L)).thenReturn(Optional.of(incident()));
+        when(executionRepository.findFirstByIncidentIdAndStatusInOrderByCreatedAtDesc(
+                any(), any()
+        )).thenReturn(Optional.empty());
+        AnalysisExecution savedExecution = mock(AnalysisExecution.class);
+        when(savedExecution.getId()).thenReturn(99L);
+        when(executionRepository.save(any(AnalysisExecution.class))).thenReturn(savedExecution);
+
+        AnalysisPersistenceService service = new AnalysisPersistenceService(
+                incidentRepository,
+                executionRepository
+        );
+
+        AnalysisPreparation preparation = service.beginAsyncAnalysis(42L);
+
+        assertThat(preparation.executionId()).isEqualTo(99L);
+        assertThat(preparation.request().incidentId()).isEqualTo(42L);
+        assertThat(preparation.request().evidence()).hasSize(1);
+        verify(executionRepository).save(org.mockito.ArgumentMatchers.argThat(
+                execution -> execution.getStatus() == AnalysisExecutionStatus.QUEUED
+        ));
+    }
+
+    @Test
+    void beginAsyncAnalysis_shouldRejectAnExistingActiveExecution() {
+        IncidentRepository incidentRepository = mock(IncidentRepository.class);
+        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
+        when(incidentRepository.findByIdForAnalysis(42L)).thenReturn(Optional.of(incident()));
+        AnalysisExecution queuedExecution = AnalysisExecution.create(42L);
+        queuedExecution.queue();
+        when(executionRepository.findFirstByIncidentIdAndStatusInOrderByCreatedAtDesc(
+                any(), any()
+        )).thenReturn(Optional.of(queuedExecution));
+        AnalysisPersistenceService service = new AnalysisPersistenceService(
+                incidentRepository,
+                executionRepository
+        );
+
+        assertThatThrownBy(() -> service.beginAsyncAnalysis(42L))
+                .isInstanceOf(AnalysisAlreadyRunningException.class);
+
+        verify(executionRepository, never()).save(any());
+    }
+
+    @Test
+    void beginAsyncAnalysis_shouldRejectIncidentWithoutEvidence() {
+        IncidentRepository incidentRepository = mock(IncidentRepository.class);
+        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
+        Incident incident = new Incident(
+                "Payment service latency",
+                "Database connection pool exhausted",
+                "LATENCY",
+                "MONITORING"
+        );
+        incident.startInvestigation();
+        when(incidentRepository.findByIdForAnalysis(42L)).thenReturn(Optional.of(incident));
+        AnalysisPersistenceService service = new AnalysisPersistenceService(
+                incidentRepository,
+                executionRepository
+        );
+
+        assertThatThrownBy(() -> service.beginAsyncAnalysis(42L))
+                .isInstanceOf(AnalysisNotAllowedException.class)
+                .hasMessage("Incident must contain evidence before analysis");
+
+        verify(executionRepository, never()).save(any());
+    }
+
+    @Test
+    void beginAsyncAnalysis_shouldRejectConfirmedRootCause() {
+        IncidentRepository incidentRepository = mock(IncidentRepository.class);
+        AnalysisExecutionRepository executionRepository = mock(AnalysisExecutionRepository.class);
+        Incident incident = incident();
+        incident.identifyRootCause(new RootCause(
+                "Connection pool exhaustion confirmed",
+                "DATABASE_CONNECTION_POOL_EXHAUSTION",
+                true
+        ));
+        when(incidentRepository.findByIdForAnalysis(42L)).thenReturn(Optional.of(incident));
+        AnalysisPersistenceService service = new AnalysisPersistenceService(
+                incidentRepository,
+                executionRepository
+        );
+
+        assertThatThrownBy(() -> service.beginAsyncAnalysis(42L))
+                .isInstanceOf(AnalysisNotAllowedException.class)
+                .hasMessage("Incident already has a confirmed root cause");
+
+        verify(executionRepository, never()).save(any());
     }
 
     @Test

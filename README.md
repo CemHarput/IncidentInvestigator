@@ -53,6 +53,19 @@ API (important endpoints)
   - POST /api/v1/incidents/{id}/resolve
   - POST /api/v1/incidents/{id}/close
 
+- Queue asynchronous analysis
+  - POST /api/v1/incidents/{id}/analyze-async
+  - Returns `202 Accepted`, an execution id, and `Location: /api/v1/analyses/{executionId}`
+  - Publishes `AnalysisRequestedEvent` to `incident.analysis.requested.v1` with the incident id as the message key
+  - Poll execution state with GET /api/v1/analyses/{executionId}
+
+Async analysis consistency limitation
+
+- V4-A commits the `QUEUED` execution before publishing to Kafka so network I/O does not run inside the database transaction.
+- Database commit and Kafka publish are not atomic. A process crash between them can leave a `QUEUED` execution without a Kafka event.
+- A reported Kafka send failure is persisted as `FAILED` / `MESSAGING_FAILURE` and returned as HTTP `503`.
+- Transactional outbox is intentionally deferred to a later reliability milestone.
+
 Design notes
 
 - Evidence can only be added while an incident is `IN_INVESTIGATION` — domain enforces this and throws `InvalidIncidentStateException` otherwise.

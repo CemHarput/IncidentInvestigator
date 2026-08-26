@@ -77,6 +77,13 @@ public class AnalysisExecution {
         this.attemptCount = 1;
     }
 
+    public void queue() {
+        if (this.status != AnalysisExecutionStatus.CREATED) {
+            throw new IllegalStateException("Only CREATED executions can be queued");
+        }
+        this.status = AnalysisExecutionStatus.QUEUED;
+    }
+
     public void complete(String rootCause, double confidence) {
         if (this.status != AnalysisExecutionStatus.RUNNING) {
             throw new IllegalStateException("Analysis execution can only complete from RUNNING state");

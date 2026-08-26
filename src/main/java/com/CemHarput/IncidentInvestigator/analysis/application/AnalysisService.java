@@ -1,6 +1,7 @@
 package com.CemHarput.IncidentInvestigator.analysis.application;
 
 import com.CemHarput.IncidentInvestigator.analysis.api.AnalysisResultResponse;
+import com.CemHarput.IncidentInvestigator.analysis.api.AsyncAnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.client.IncidentAnalyzerClient;
 import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionFailureType;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisRequest;
@@ -8,11 +9,16 @@ import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateResponse;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResponseException;
+import com.CemHarput.IncidentInvestigator.analysis.messaging.AnalysisEventPublisher;
+import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +32,7 @@ public class AnalysisService {
 
     private final AnalysisPersistenceService persistenceService;
     private final IncidentAnalyzerClient analyzerClient;
+    private final AnalysisEventPublisher eventPublisher;
     private final MeterRegistry meterRegistry;
     private final int maxAttempts;
     private final Duration retryBackoff;
@@ -33,15 +40,51 @@ public class AnalysisService {
     public AnalysisService(
             AnalysisPersistenceService persistenceService,
             IncidentAnalyzerClient analyzerClient,
+            AnalysisEventPublisher eventPublisher,
             MeterRegistry meterRegistry,
             @Value("${incident-analyzer.retry.max-attempts:2}") int maxAttempts,
             @Value("${incident-analyzer.retry.backoff:100ms}") Duration retryBackoff
     ) {
         this.persistenceService = persistenceService;
         this.analyzerClient = analyzerClient;
+        this.eventPublisher = eventPublisher;
         this.meterRegistry = meterRegistry;
         this.maxAttempts = Math.max(maxAttempts, 1);
         this.retryBackoff = retryBackoff;
+    }
+
+    public AsyncAnalysisResponse analyzeIncidentAsync(Long incidentId) {
+        AnalysisPreparation preparation = persistenceService.beginAsyncAnalysis(incidentId);
+        AnalysisRequest request = preparation.request();
+        AnalysisRequestedEvent event = new AnalysisRequestedEvent(
+                UUID.randomUUID(),
+                preparation.executionId(),
+                request.incidentId(),
+                request.title(),
+                request.incidentType(),
+                request.evidence(),
+                LocalDateTime.now()
+        );
+
+        try {
+            eventPublisher.publishAnalysisRequested(event);
+        } catch (RuntimeException ex) {
+            AnalysisMessagingException failure = ex instanceof AnalysisMessagingException messagingException
+                    ? messagingException
+                    : new AnalysisMessagingException("Failed to publish analysis request", ex);
+            persistFailurePreservingOriginal(
+                    preparation.executionId(),
+                    failure,
+                    AnalysisExecutionFailureType.MESSAGING_FAILURE
+            );
+            throw failure;
+        }
+
+        return new AsyncAnalysisResponse(
+                preparation.executionId(),
+                request.incidentId(),
+                "QUEUED"
+        );
     }
 
     public AnalysisResultResponse analyzeIncident(Long incidentId) {

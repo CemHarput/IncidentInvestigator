@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.CemHarput.IncidentInvestigator.analysis.api.AnalysisResultResponse;
+import com.CemHarput.IncidentInvestigator.analysis.api.AsyncAnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.client.IncidentAnalyzerClient;
 import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionFailureType;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisRequest;
@@ -18,11 +19,15 @@ import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateResponse;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
+import com.CemHarput.IncidentInvestigator.analysis.messaging.AnalysisEventPublisher;
+import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 class AnalysisServiceTest {
@@ -186,6 +191,61 @@ class AnalysisServiceTest {
     }
 
     @Test
+    void analyzeIncidentAsync_shouldPublishQueuedExecutionSnapshot() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAsyncAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+        AnalysisEventPublisher publisher = mock(AnalysisEventPublisher.class);
+        AnalysisService service = service(
+                persistenceService,
+                mock(IncidentAnalyzerClient.class),
+                publisher,
+                2
+        );
+
+        AsyncAnalysisResponse response = service.analyzeIncidentAsync(42L);
+
+        assertThat(response.executionId()).isEqualTo(99L);
+        assertThat(response.incidentId()).isEqualTo(42L);
+        assertThat(response.status()).isEqualTo("QUEUED");
+        ArgumentCaptor<AnalysisRequestedEvent> eventCaptor =
+                ArgumentCaptor.forClass(AnalysisRequestedEvent.class);
+        verify(publisher).publishAnalysisRequested(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().eventId()).isNotNull();
+        assertThat(eventCaptor.getValue().executionId()).isEqualTo(99L);
+        assertThat(eventCaptor.getValue().incidentId()).isEqualTo(42L);
+        assertThat(eventCaptor.getValue().title()).isEqualTo("Payment service latency");
+        assertThat(eventCaptor.getValue().requestedAt()).isNotNull();
+    }
+
+    @Test
+    void analyzeIncidentAsync_shouldFailExecutionWhenPublishingFails() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAsyncAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+        AnalysisEventPublisher publisher = mock(AnalysisEventPublisher.class);
+        AnalysisMessagingException failure = new AnalysisMessagingException(
+                "Failed to publish analysis request",
+                new RuntimeException("Kafka unavailable")
+        );
+        doThrow(failure).when(publisher).publishAnalysisRequested(any());
+        AnalysisService service = service(
+                persistenceService,
+                mock(IncidentAnalyzerClient.class),
+                publisher,
+                2
+        );
+
+        assertThatThrownBy(() -> service.analyzeIncidentAsync(42L)).isSameAs(failure);
+
+        verify(persistenceService).persistFailure(
+                99L,
+                "Failed to publish analysis request",
+                AnalysisExecutionFailureType.MESSAGING_FAILURE
+        );
+    }
+
+    @Test
     void analyzeIncident_shouldNotMarkCompletedExecutionFailedWhenObservabilityFails() {
         AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
         when(persistenceService.beginAnalysis(42L))
@@ -290,8 +350,24 @@ class AnalysisServiceTest {
         return service(
                 persistenceService,
                 client,
-                new SimpleMeterRegistry(),
+                mock(AnalysisEventPublisher.class),
                 maxAttempts
+        );
+    }
+
+    private AnalysisService service(
+            AnalysisPersistenceService persistenceService,
+            IncidentAnalyzerClient client,
+            AnalysisEventPublisher publisher,
+            int maxAttempts
+    ) {
+        return new AnalysisService(
+                persistenceService,
+                client,
+                publisher,
+                new SimpleMeterRegistry(),
+                maxAttempts,
+                Duration.ZERO
         );
     }
 
@@ -304,6 +380,7 @@ class AnalysisServiceTest {
         return new AnalysisService(
                 persistenceService,
                 client,
+                mock(AnalysisEventPublisher.class),
                 meterRegistry,
                 maxAttempts,
                 Duration.ZERO

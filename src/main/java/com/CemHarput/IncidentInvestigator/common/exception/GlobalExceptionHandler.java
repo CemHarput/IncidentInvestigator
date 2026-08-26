@@ -2,6 +2,7 @@ package com.CemHarput.IncidentInvestigator.common.exception;
 
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisAlreadyRunningException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerUnavailableException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
@@ -67,6 +68,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAnalyzerUnavailable(AnalyzerUnavailableException ex) {
         ApiError error = new ApiError(
                 "ANALYZER_UNAVAILABLE",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+    }
+
+    @ExceptionHandler(AnalysisMessagingException.class)
+    public ResponseEntity<ApiError> handleAnalysisMessaging(AnalysisMessagingException ex) {
+        ApiError error = new ApiError(
+                "ANALYSIS_MESSAGING_UNAVAILABLE",
                 ex.getMessage(),
                 LocalDateTime.now()
         );

@@ -24,6 +24,7 @@ public class AnalysisPersistenceService {
 
     private static final List<AnalysisExecutionStatus> ACTIVE_STATUSES = List.of(
             AnalysisExecutionStatus.CREATED,
+            AnalysisExecutionStatus.QUEUED,
             AnalysisExecutionStatus.RUNNING
     );
 
@@ -53,6 +54,26 @@ public class AnalysisPersistenceService {
 
         AnalysisExecution execution = AnalysisExecution.create(incidentId);
         execution.start();
+        execution = analysisExecutionRepository.save(execution);
+
+        return new AnalysisPreparation(execution.getId(), toAnalysisRequest(incidentId, incident));
+    }
+
+    @Transactional
+    public AnalysisPreparation beginAsyncAnalysis(Long incidentId) {
+        Incident incident = incidentRepository.findByIdForAnalysis(incidentId)
+                .orElseThrow(() -> new IncidentNotFoundException(incidentId));
+
+        validateAnalysisAllowed(incident);
+
+        if (analysisExecutionRepository
+                .findFirstByIncidentIdAndStatusInOrderByCreatedAtDesc(incidentId, ACTIVE_STATUSES)
+                .isPresent()) {
+            throw new AnalysisAlreadyRunningException(incidentId);
+        }
+
+        AnalysisExecution execution = AnalysisExecution.create(incidentId);
+        execution.queue();
         execution = analysisExecutionRepository.save(execution);
 
         return new AnalysisPreparation(execution.getId(), toAnalysisRequest(incidentId, incident));

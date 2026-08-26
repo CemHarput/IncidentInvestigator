@@ -3,6 +3,7 @@ package com.CemHarput.IncidentInvestigator.analysis.api;
 import com.CemHarput.IncidentInvestigator.analysis.application.AnalysisService;
 import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecution;
 import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecutionRepository;
+import java.net.URI;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,6 +32,16 @@ public class AnalysisController {
             @PathVariable Long id
     ) {
         return ResponseEntity.ok(analysisService.analyzeIncident(id));
+    }
+
+    @PostMapping("/incidents/{id}/analyze-async")
+    public ResponseEntity<AsyncAnalysisResponse> analyzeAsync(
+            @PathVariable Long id
+    ) {
+        AsyncAnalysisResponse response = analysisService.analyzeIncidentAsync(id);
+        return ResponseEntity.accepted()
+                .location(URI.create("/api/v1/analyses/" + response.executionId()))
+                .body(response);
     }
 
     @GetMapping("/incidents/{incidentId}/analyses")

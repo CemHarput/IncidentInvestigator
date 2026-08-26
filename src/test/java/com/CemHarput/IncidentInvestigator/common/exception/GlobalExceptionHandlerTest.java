@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisAlreadyRunningException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalyzerDownstreamException;
+import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,5 +33,16 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().code()).isEqualTo("ANALYZER_DOWNSTREAM_ERROR");
+    }
+
+    @Test
+    void messagingFailure_shouldReturnServiceUnavailable() {
+        ResponseEntity<ApiError> response = handler.handleAnalysisMessaging(
+                new AnalysisMessagingException("Kafka unavailable", new RuntimeException())
+        );
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().code()).isEqualTo("ANALYSIS_MESSAGING_UNAVAILABLE");
     }
 }
