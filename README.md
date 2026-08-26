@@ -66,6 +66,15 @@ Async analysis consistency limitation
 - A reported Kafka send failure is persisted as `FAILED` / `MESSAGING_FAILURE` and returned as HTTP `503`.
 - Transactional outbox is intentionally deferred to a later reliability milestone.
 
+Async analysis result consumption (V4-B Java scope)
+
+- The Java service consumes completed and failed results from `incident.analysis.completed.v1` and `incident.analysis.failed.v1`.
+- Completed results select the highest-confidence candidate. `UNKNOWN` or confidence below `0.60` makes the execution `INCONCLUSIVE`; otherwise an unconfirmed root cause is attached and the execution becomes `COMPLETED`.
+- Failed results make the execution `FAILED` without changing the incident root cause.
+- `resultEventId` provides idempotency: replaying the same result is ignored, while a different result for a terminal execution is rejected.
+- Consumer processing updates the execution and incident in one database transaction. Failed processing is attempted three times, then routed to the source topic's `.DLT` topic.
+- The Python Kafka worker is intentionally not implemented in this change.
+
 Design notes
 
 - Evidence can only be added while an incident is `IN_INVESTIGATION` — domain enforces this and throws `InvalidIncidentStateException` otherwise.

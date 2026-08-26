@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 
 @Entity
 @Table(name = "analysis_executions")
@@ -54,6 +55,9 @@ public class AnalysisExecution {
     @Column(name = "duration_ms")
     private Long durationMs;
 
+    @Column(name = "result_event_id", unique = true)
+    private UUID resultEventId;
+
     protected AnalysisExecution() {
         this.status = AnalysisExecutionStatus.CREATED;
         this.createdAt = LocalDateTime.now();
@@ -88,6 +92,17 @@ public class AnalysisExecution {
         if (this.status != AnalysisExecutionStatus.RUNNING) {
             throw new IllegalStateException("Analysis execution can only complete from RUNNING state");
         }
+        completeExecution(rootCause, confidence);
+    }
+
+    public void completeAsync(String rootCause, double confidence, UUID eventId) {
+        requireQueued();
+        requireEventId(eventId);
+        completeExecution(rootCause, confidence);
+        this.resultEventId = eventId;
+    }
+
+    private void completeExecution(String rootCause, double confidence) {
         this.status = AnalysisExecutionStatus.COMPLETED;
         this.selectedRootCause = rootCause;
         this.selectedConfidence = confidence;
@@ -99,6 +114,17 @@ public class AnalysisExecution {
         if (this.status != AnalysisExecutionStatus.RUNNING) {
             throw new IllegalStateException("Analysis execution can only be marked inconclusive from RUNNING state");
         }
+        markExecutionInconclusive(confidence);
+    }
+
+    public void markAsyncInconclusive(double confidence, UUID eventId) {
+        requireQueued();
+        requireEventId(eventId);
+        markExecutionInconclusive(confidence);
+        this.resultEventId = eventId;
+    }
+
+    private void markExecutionInconclusive(double confidence) {
         this.status = AnalysisExecutionStatus.INCONCLUSIVE;
         this.selectedRootCause = "UNKNOWN";
         this.selectedConfidence = confidence;
@@ -120,6 +146,35 @@ public class AnalysisExecution {
         this.completedAt = LocalDateTime.now();
         this.attemptCount = this.attemptCount == null ? 1 : Math.max(this.attemptCount, 1);
         calculateDuration();
+    }
+
+    public void failAsync(
+            String reason,
+            AnalysisExecutionFailureType failureType,
+            UUID eventId
+    ) {
+        requireQueued();
+        requireEventId(eventId);
+        fail(reason, failureType);
+        this.resultEventId = eventId;
+    }
+
+    public boolean hasProcessedResult(UUID eventId) {
+        return eventId != null && eventId.equals(this.resultEventId);
+    }
+
+    private void requireQueued() {
+        if (this.status != AnalysisExecutionStatus.QUEUED) {
+            throw new IllegalStateException(
+                    "Async analysis result can only be applied to a QUEUED execution"
+            );
+        }
+    }
+
+    private void requireEventId(UUID eventId) {
+        if (eventId == null) {
+            throw new IllegalArgumentException("Result eventId is required");
+        }
     }
 
     public void incrementAttemptCount() {
@@ -181,5 +236,9 @@ public class AnalysisExecution {
 
     public Long getDurationMs() {
         return durationMs;
+    }
+
+    public UUID getResultEventId() {
+        return resultEventId;
     }
 }

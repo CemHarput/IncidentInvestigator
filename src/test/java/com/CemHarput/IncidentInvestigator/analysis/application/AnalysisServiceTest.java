@@ -365,6 +365,7 @@ class AnalysisServiceTest {
                 persistenceService,
                 client,
                 publisher,
+                new AnalysisResultEvaluator(),
                 new SimpleMeterRegistry(),
                 maxAttempts,
                 Duration.ZERO
@@ -381,6 +382,7 @@ class AnalysisServiceTest {
                 persistenceService,
                 client,
                 mock(AnalysisEventPublisher.class),
+                new AnalysisResultEvaluator(),
                 meterRegistry,
                 maxAttempts,
                 Duration.ZERO

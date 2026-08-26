@@ -17,7 +17,6 @@ import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisReque
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,11 +27,10 @@ import org.springframework.stereotype.Service;
 public class AnalysisService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AnalysisService.class);
-    private static final double MIN_CONFIDENCE = 0.60d;
-
     private final AnalysisPersistenceService persistenceService;
     private final IncidentAnalyzerClient analyzerClient;
     private final AnalysisEventPublisher eventPublisher;
+    private final AnalysisResultEvaluator resultEvaluator;
     private final MeterRegistry meterRegistry;
     private final int maxAttempts;
     private final Duration retryBackoff;
@@ -41,6 +39,7 @@ public class AnalysisService {
             AnalysisPersistenceService persistenceService,
             IncidentAnalyzerClient analyzerClient,
             AnalysisEventPublisher eventPublisher,
+            AnalysisResultEvaluator resultEvaluator,
             MeterRegistry meterRegistry,
             @Value("${incident-analyzer.retry.max-attempts:2}") int maxAttempts,
             @Value("${incident-analyzer.retry.backoff:100ms}") Duration retryBackoff
@@ -48,6 +47,7 @@ public class AnalysisService {
         this.persistenceService = persistenceService;
         this.analyzerClient = analyzerClient;
         this.eventPublisher = eventPublisher;
+        this.resultEvaluator = resultEvaluator;
         this.meterRegistry = meterRegistry;
         this.maxAttempts = Math.max(maxAttempts, 1);
         this.retryBackoff = retryBackoff;
@@ -97,10 +97,10 @@ public class AnalysisService {
 
         try {
             AnalysisResponse response = analyzeWithRetry(preparation, attemptTracker);
-            validateResponse(incidentId, response);
-
-            bestCandidate = selectBestCandidate(response);
-            inconclusive = isInconclusive(bestCandidate);
+            AnalysisResultEvaluator.Evaluation evaluation =
+                    resultEvaluator.evaluate(incidentId, response);
+            bestCandidate = evaluation.candidate();
+            inconclusive = evaluation.inconclusive();
 
             if (inconclusive) {
                 persistenceService.markInconclusive(executionId, bestCandidate.confidence());
@@ -298,59 +298,4 @@ public class AnalysisService {
         private int count;
     }
 
-    private void validateResponse(Long expectedIncidentId, AnalysisResponse response) {
-        if (response == null) {
-            throw new InvalidAnalyzerResponseException("Analyzer returned an empty response");
-        }
-
-        if (!expectedIncidentId.equals(response.incidentId())) {
-            throw new InvalidAnalyzerResponseException(
-                    "Analyzer response incidentId does not match request"
-            );
-        }
-
-        if (response.candidates() == null || response.candidates().isEmpty()) {
-            throw new InvalidAnalyzerResponseException(
-                    "Analyzer returned no root cause candidates"
-            );
-        }
-
-        for (RootCauseCandidateResponse candidate : response.candidates()) {
-            if (candidate == null) {
-                throw new InvalidAnalyzerResponseException(
-                        "Analyzer returned a null candidate"
-                );
-            }
-
-            if (candidate.rootCause() == null || candidate.rootCause().isBlank()) {
-                throw new InvalidAnalyzerResponseException(
-                        "Analyzer returned a candidate with a blank root cause"
-                );
-            }
-
-            if (candidate.confidence() < 0 || candidate.confidence() > 1.0d) {
-                throw new InvalidAnalyzerResponseException(
-                        "Analyzer returned a candidate with an invalid confidence value"
-                );
-            }
-        }
-    }
-
-    private RootCauseCandidateResponse selectBestCandidate(AnalysisResponse response) {
-        return response.candidates().stream()
-                .max(Comparator.comparingDouble(RootCauseCandidateResponse::confidence))
-                .orElseThrow(() -> new InvalidAnalyzerResponseException(
-                        "Analyzer returned no root cause candidates"
-                ));
-    }
-
-    private boolean isInconclusive(RootCauseCandidateResponse candidate) {
-        if (candidate == null) {
-            return true;
-        }
-        if ("UNKNOWN".equalsIgnoreCase(candidate.rootCause())) {
-            return true;
-        }
-        return candidate.confidence() < MIN_CONFIDENCE;
-    }
 }

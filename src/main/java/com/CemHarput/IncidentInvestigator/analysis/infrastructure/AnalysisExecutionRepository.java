@@ -5,6 +5,10 @@ import com.CemHarput.IncidentInvestigator.analysis.domain.AnalysisExecutionStatu
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface AnalysisExecutionRepository extends JpaRepository<AnalysisExecution, Long> {
@@ -15,4 +19,8 @@ public interface AnalysisExecutionRepository extends JpaRepository<AnalysisExecu
             Long incidentId,
             Collection<AnalysisExecutionStatus> statuses
     );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select execution from AnalysisExecution execution where execution.id = :id")
+    Optional<AnalysisExecution> findByIdForUpdate(@Param("id") Long id);
 }
