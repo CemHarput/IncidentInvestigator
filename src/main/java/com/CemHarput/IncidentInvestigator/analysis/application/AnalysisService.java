@@ -15,6 +15,8 @@ import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResp
 import com.CemHarput.IncidentInvestigator.analysis.messaging.AnalysisEventPublisher;
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -32,6 +34,7 @@ public class AnalysisService {
     private final AnalysisEventPublisher eventPublisher;
     private final AnalysisResultEvaluator resultEvaluator;
     private final MeterRegistry meterRegistry;
+    private final Tracer tracer;
     private final int maxAttempts;
     private final Duration retryBackoff;
 
@@ -41,6 +44,7 @@ public class AnalysisService {
             AnalysisEventPublisher eventPublisher,
             AnalysisResultEvaluator resultEvaluator,
             MeterRegistry meterRegistry,
+            Tracer tracer,
             @Value("${incident-analyzer.retry.max-attempts:2}") int maxAttempts,
             @Value("${incident-analyzer.retry.backoff:100ms}") Duration retryBackoff
     ) {
@@ -49,42 +53,58 @@ public class AnalysisService {
         this.eventPublisher = eventPublisher;
         this.resultEvaluator = resultEvaluator;
         this.meterRegistry = meterRegistry;
+        this.tracer = tracer;
         this.maxAttempts = Math.max(maxAttempts, 1);
         this.retryBackoff = retryBackoff;
     }
 
     public AsyncAnalysisResponse analyzeIncidentAsync(Long incidentId) {
-        AnalysisPreparation preparation = persistenceService.beginAsyncAnalysis(incidentId);
-        AnalysisRequest request = preparation.request();
-        AnalysisRequestedEvent event = new AnalysisRequestedEvent(
-                UUID.randomUUID(),
-                preparation.executionId(),
-                request.incidentId(),
-                request.title(),
-                request.incidentType(),
-                request.evidence(),
-                LocalDateTime.now()
-        );
+        Span span = tracer.nextSpan().name("analysis.execution.create").start();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            AnalysisPreparation preparation = persistenceService.beginAsyncAnalysis(incidentId);
+            AnalysisRequest request = preparation.request();
+            span.tag("analysis.execution.id", preparation.executionId().toString());
+            span.tag("incident.id", request.incidentId().toString());
+            span.tag("analysis.mode", "async");
+            span.tag("analysis.status", "queued");
 
-        try {
-            eventPublisher.publishAnalysisRequested(event);
-        } catch (RuntimeException ex) {
-            AnalysisMessagingException failure = ex instanceof AnalysisMessagingException messagingException
-                    ? messagingException
-                    : new AnalysisMessagingException("Failed to publish analysis request", ex);
-            persistFailurePreservingOriginal(
+            AnalysisRequestedEvent event = new AnalysisRequestedEvent(
+                    UUID.randomUUID(),
                     preparation.executionId(),
-                    failure,
-                    AnalysisExecutionFailureType.MESSAGING_FAILURE
+                    request.incidentId(),
+                    request.title(),
+                    request.incidentType(),
+                    request.evidence(),
+                    LocalDateTime.now()
             );
-            throw failure;
-        }
 
-        return new AsyncAnalysisResponse(
-                preparation.executionId(),
-                request.incidentId(),
-                "QUEUED"
-        );
+            try {
+                eventPublisher.publishAnalysisRequested(event);
+            } catch (RuntimeException ex) {
+                AnalysisMessagingException failure = ex instanceof AnalysisMessagingException messagingException
+                        ? messagingException
+                        : new AnalysisMessagingException("Failed to publish analysis request", ex);
+                persistFailurePreservingOriginal(
+                        preparation.executionId(),
+                        failure,
+                        AnalysisExecutionFailureType.MESSAGING_FAILURE
+                );
+                incrementCounterBestEffort("incident.analysis.async.failed.total");
+                throw failure;
+            }
+
+            incrementCounterBestEffort("incident.analysis.async.requested.total");
+            return new AsyncAnalysisResponse(
+                    preparation.executionId(),
+                    request.incidentId(),
+                    "QUEUED"
+            );
+        } catch (RuntimeException ex) {
+            span.error(ex);
+            throw ex;
+        } finally {
+            span.end();
+        }
     }
 
     public AnalysisResultResponse analyzeIncident(Long incidentId) {
@@ -272,6 +292,14 @@ public class AnalysisService {
         meterRegistry.counter("incident.analysis.executions", "outcome", outcome).increment();
         meterRegistry.timer("incident.analysis.duration", "outcome", outcome)
                 .record(Duration.ofNanos(System.nanoTime() - startedAt));
+    }
+
+    private void incrementCounterBestEffort(String name) {
+        try {
+            meterRegistry.counter(name).increment();
+        } catch (RuntimeException ex) {
+            LOGGER.warn("Failed to increment analysis metric name={}", name, ex);
+        }
     }
 
     private void logFinished(

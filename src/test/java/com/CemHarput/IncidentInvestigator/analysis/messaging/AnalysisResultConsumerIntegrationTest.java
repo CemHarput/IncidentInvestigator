@@ -13,6 +13,12 @@ import com.CemHarput.IncidentInvestigator.incident.domain.Evidence;
 import com.CemHarput.IncidentInvestigator.incident.domain.EvidenceType;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -28,6 +34,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.SdkTracerProviderBuilderCustomizer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -42,6 +52,7 @@ import org.testcontainers.utility.DockerImageName;
         "analysis.kafka.consumer.retry-backoff=0ms"
 })
 @Testcontainers
+@Import(AnalysisResultConsumerIntegrationTest.TracingTestConfiguration.class)
 class AnalysisResultConsumerIntegrationTest {
 
     private static final String COMPLETED_TOPIC = "incident.analysis.completed.v1";
@@ -71,6 +82,15 @@ class AnalysisResultConsumerIntegrationTest {
     @Autowired
     AnalysisExecutionRepository executionRepository;
 
+    @Autowired
+    Tracer tracer;
+
+    @Autowired
+    InMemorySpanExporter spanExporter;
+
+    @Autowired
+    MeterRegistry meterRegistry;
+
     @DynamicPropertySource
     static void infrastructureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
@@ -83,6 +103,7 @@ class AnalysisResultConsumerIntegrationTest {
 
     @BeforeEach
     void cleanDatabase() {
+        spanExporter.reset();
         executionRepository.deleteAll();
         incidentRepository.deleteAll();
     }
@@ -104,11 +125,17 @@ class AnalysisResultConsumerIntegrationTest {
                 LocalDateTime.now()
         );
 
-        kafkaTemplate.send(
-                COMPLETED_TOPIC,
-                completedAnalysis.incidentId().toString(),
-                completedEvent
-        ).get();
+        Span parentSpan = tracer.nextSpan().name("test.analysis-result-parent").start();
+        String expectedTraceId = parentSpan.context().traceId();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(parentSpan)) {
+            kafkaTemplate.send(
+                    COMPLETED_TOPIC,
+                    completedAnalysis.incidentId().toString(),
+                    completedEvent
+            ).get();
+        } finally {
+            parentSpan.end();
+        }
 
         AnalysisExecution completed = awaitExecution(
                 completedAnalysis.executionId(),
@@ -118,6 +145,10 @@ class AnalysisResultConsumerIntegrationTest {
         assertThat(incidentService.getIncident(completedAnalysis.incidentId())
                 .rootCause().rootCauseType())
                 .isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
+        assertThat(awaitSpan("spring.consume.analysis-completed", expectedTraceId).getTraceId())
+                .isEqualTo(expectedTraceId);
+        assertThat(awaitSpan("analysis.execution.persist-result", expectedTraceId).getTraceId())
+                .isEqualTo(expectedTraceId);
 
         PreparedAnalysis failedAnalysis = prepareQueuedAnalysis();
         UUID failedEventId = UUID.randomUUID();
@@ -145,6 +176,9 @@ class AnalysisResultConsumerIntegrationTest {
 
     @Test
     void poisonCompletedMessage_shouldBePublishedToDlt() throws Exception {
+        double dltCountBefore = meterRegistry
+                .counter("incident.analysis.kafka.dlt.total")
+                .count();
         try (KafkaConsumer<String, String> dltConsumer = consumer("analysis-result-dlt-test")) {
             dltConsumer.subscribe(List.of(COMPLETED_DLT));
             awaitAssignment(dltConsumer);
@@ -155,6 +189,8 @@ class AnalysisResultConsumerIntegrationTest {
             assertThat(dltRecord.topic()).isEqualTo(COMPLETED_DLT);
             assertThat(dltRecord.key()).isEqualTo("42");
             assertThat(dltRecord.value()).contains("not-an-analysis-event");
+            assertThat(meterRegistry.counter("incident.analysis.kafka.dlt.total").count())
+                    .isEqualTo(dltCountBefore + 1.0d);
         }
     }
 
@@ -222,6 +258,37 @@ class AnalysisResultConsumerIntegrationTest {
             }
         }
         throw new AssertionError("No record received from " + COMPLETED_DLT);
+    }
+
+    private SpanData awaitSpan(String name, String traceId) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        while (System.nanoTime() < deadline) {
+            for (SpanData span : spanExporter.getFinishedSpanItems()) {
+                if (span.getName().equals(name) && span.getTraceId().equals(traceId)) {
+                    return span;
+                }
+            }
+            Thread.sleep(100L);
+        }
+        throw new AssertionError("Span was not exported: " + name);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TracingTestConfiguration {
+
+        @Bean
+        InMemorySpanExporter inMemorySpanExporter() {
+            return InMemorySpanExporter.create();
+        }
+
+        @Bean
+        SdkTracerProviderBuilderCustomizer testSpanExporter(
+                InMemorySpanExporter spanExporter
+        ) {
+            return builder -> builder.addSpanProcessor(
+                    SimpleSpanProcessor.create(spanExporter)
+            );
+        }
     }
 
     private record PreparedAnalysis(Long incidentId, Long executionId) {

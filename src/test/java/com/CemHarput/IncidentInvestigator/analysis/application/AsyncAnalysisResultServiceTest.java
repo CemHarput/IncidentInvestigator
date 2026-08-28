@@ -17,6 +17,9 @@ import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisCompl
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisFailedEvent;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.test.simple.SimpleTracer;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -46,6 +49,18 @@ class AsyncAnalysisResultServiceTest {
         assertThat(fixture.incident.getRootCause()).isNotNull();
         assertThat(fixture.incident.getRootCause().getRootCauseType())
                 .isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
+        assertThat(fixture.meterRegistry
+                .counter("incident.analysis.async.completed.total").count())
+                .isEqualTo(1.0d);
+        assertThat(fixture.meterRegistry
+                .timer("incident.analysis.async.end.to.end.duration").count())
+                .isEqualTo(1L);
+        assertThat(fixture.tracer.onlySpan().getName())
+                .isEqualTo("analysis.execution.persist-result");
+        assertThat(fixture.tracer.onlySpan().getTags())
+                .containsEntry("analysis.final.status", "COMPLETED")
+                .containsEntry("analysis.execution.id", "99")
+                .containsEntry("incident.id", "42");
     }
 
     @Test
@@ -62,6 +77,9 @@ class AsyncAnalysisResultServiceTest {
         assertThat(fixture.execution.getResultEventId()).isEqualTo(event.eventId());
         assertThat(fixture.incident.getRootCause()).isNull();
         verify(fixture.incidentRepository, never()).findByIdForAnalysis(42L);
+        assertThat(fixture.meterRegistry
+                .counter("incident.analysis.async.inconclusive.total").count())
+                .isEqualTo(1.0d);
     }
 
     @Test
@@ -94,6 +112,12 @@ class AsyncAnalysisResultServiceTest {
         assertThat(fixture.execution.getResultEventId()).isEqualTo(event.eventId());
         assertThat(fixture.incident.getRootCause()).isNull();
         verify(fixture.incidentRepository, never()).findByIdForAnalysis(42L);
+        assertThat(fixture.meterRegistry
+                .counter("incident.analysis.async.failed.total").count())
+                .isEqualTo(1.0d);
+        assertThat(fixture.tracer.onlySpan().getTags())
+                .containsEntry("analysis.final.status", "FAILED")
+                .containsEntry("analysis.failure.type", "INTERNAL_ERROR");
     }
 
     @Test
@@ -169,12 +193,23 @@ class AsyncAnalysisResultServiceTest {
         incident.startInvestigation();
         when(executionRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(execution));
         when(incidentRepository.findByIdForAnalysis(42L)).thenReturn(Optional.of(incident));
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SimpleTracer tracer = new SimpleTracer();
         AsyncAnalysisResultService service = new AsyncAnalysisResultService(
                 executionRepository,
                 incidentRepository,
-                new AnalysisResultEvaluator()
+                new AnalysisResultEvaluator(),
+                meterRegistry,
+                tracer
         );
-        return new Fixture(service, execution, incident, incidentRepository);
+        return new Fixture(
+                service,
+                execution,
+                incident,
+                incidentRepository,
+                meterRegistry,
+                tracer
+        );
     }
 
     private AnalysisCompletedEvent completedEvent(
@@ -214,7 +249,9 @@ class AsyncAnalysisResultServiceTest {
             AsyncAnalysisResultService service,
             AnalysisExecution execution,
             Incident incident,
-            IncidentRepository incidentRepository
+            IncidentRepository incidentRepository,
+            SimpleMeterRegistry meterRegistry,
+            SimpleTracer tracer
     ) {
     }
 }

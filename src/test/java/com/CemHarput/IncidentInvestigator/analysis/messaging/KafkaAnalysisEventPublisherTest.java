@@ -10,6 +10,10 @@ import static org.mockito.Mockito.when;
 
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingException;
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.test.simple.SimpleSpan;
+import io.micrometer.tracing.test.simple.SimpleTracer;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -33,16 +37,27 @@ class KafkaAnalysisEventPublisherTest {
         CompletableFuture<SendResult<String, Object>> send = mock();
         when(kafkaTemplate.send(TOPIC, "42", event)).thenReturn(send);
         when(send.get(250L, TimeUnit.MILLISECONDS)).thenReturn(sendResult);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SimpleTracer tracer = new SimpleTracer();
         KafkaAnalysisEventPublisher publisher = new KafkaAnalysisEventPublisher(
                 kafkaTemplate,
                 TOPIC,
-                Duration.ofMillis(250)
+                Duration.ofMillis(250),
+                meterRegistry,
+                tracer
         );
 
         publisher.publishAnalysisRequested(event);
 
         verify(kafkaTemplate).send(TOPIC, "42", event);
         verify(send).get(250L, TimeUnit.MILLISECONDS);
+        SimpleSpan span = tracer.onlySpan();
+        assertThat(span.getName()).isEqualTo("kafka.publish.analysis-request");
+        assertThat(span.getTags())
+                .containsEntry("messaging.system", "kafka")
+                .containsEntry("messaging.destination", TOPIC)
+                .containsEntry("analysis.execution.id", "99")
+                .containsEntry("incident.id", "42");
     }
 
     @Test
@@ -52,15 +67,22 @@ class KafkaAnalysisEventPublisherTest {
         CompletableFuture<SendResult<String, Object>> failedSend = new CompletableFuture<>();
         failedSend.completeExceptionally(new RuntimeException("Kafka unavailable"));
         when(kafkaTemplate.send(TOPIC, "42", event)).thenReturn(failedSend);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SimpleTracer tracer = new SimpleTracer();
         KafkaAnalysisEventPublisher publisher = new KafkaAnalysisEventPublisher(
                 kafkaTemplate,
                 TOPIC,
-                Duration.ofSeconds(5)
+                Duration.ofSeconds(5),
+                meterRegistry,
+                tracer
         );
 
         assertThatThrownBy(() -> publisher.publishAnalysisRequested(event))
                 .isInstanceOf(AnalysisMessagingException.class)
                 .hasMessage("Failed to publish analysis request");
+        assertThat(meterRegistry.counter("incident.analysis.kafka.publish.failures").count())
+                .isEqualTo(1.0d);
+        assertThat(tracer.onlySpan().getError()).isNotNull();
     }
 
     @Test
@@ -73,7 +95,9 @@ class KafkaAnalysisEventPublisherTest {
         KafkaAnalysisEventPublisher publisher = new KafkaAnalysisEventPublisher(
                 kafkaTemplate,
                 TOPIC,
-                Duration.ofMillis(1)
+                Duration.ofMillis(1),
+                new SimpleMeterRegistry(),
+                Tracer.NOOP
         );
 
         assertThatThrownBy(() -> publisher.publishAnalysisRequested(event))
@@ -93,7 +117,9 @@ class KafkaAnalysisEventPublisherTest {
         KafkaAnalysisEventPublisher publisher = new KafkaAnalysisEventPublisher(
                 kafkaTemplate,
                 TOPIC,
-                Duration.ofSeconds(5)
+                Duration.ofSeconds(5),
+                new SimpleMeterRegistry(),
+                Tracer.NOOP
         );
 
         try {

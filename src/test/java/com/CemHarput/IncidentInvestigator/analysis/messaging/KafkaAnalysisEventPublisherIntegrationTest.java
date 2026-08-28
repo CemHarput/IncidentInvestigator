@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisEvidence;
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -79,6 +80,11 @@ class KafkaAnalysisEventPublisherIntegrationTest {
             JsonNode payload = objectMapper.readTree(record.value());
 
             assertThat(record.key()).isEqualTo("42");
+            assertThat(record.headers().lastHeader("traceparent")).isNotNull();
+            assertThat(new String(
+                    record.headers().lastHeader("traceparent").value(),
+                    StandardCharsets.UTF_8
+            )).matches("00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}");
             assertThat(payload.get("eventId").asText()).isEqualTo(event.eventId().toString());
             assertThat(payload.get("executionId").asLong()).isEqualTo(99L);
             assertThat(payload.get("incidentId").asLong()).isEqualTo(42L);
@@ -86,6 +92,7 @@ class KafkaAnalysisEventPublisherIntegrationTest {
             assertThat(payload.get("evidence").get(0).get("observedAt").asText())
                     .startsWith("2026-08-24T12:00");
             assertThat(payload.get("requestedAt").asText()).isNotBlank();
+            assertThat(payload.has("traceId")).isFalse();
         }
     }
 

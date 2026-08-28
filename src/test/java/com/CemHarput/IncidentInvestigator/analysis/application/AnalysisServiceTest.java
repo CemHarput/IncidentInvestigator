@@ -25,6 +25,9 @@ import com.CemHarput.IncidentInvestigator.analysis.messaging.AnalysisEventPublis
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.test.simple.SimpleSpan;
+import io.micrometer.tracing.test.simple.SimpleTracer;
 import java.time.Duration;
 import java.util.List;
 import org.mockito.ArgumentCaptor;
@@ -219,6 +222,37 @@ class AnalysisServiceTest {
     }
 
     @Test
+    void analyzeIncidentAsync_shouldCreateBusinessSpanAndIncrementRequestedMetric() {
+        AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
+        when(persistenceService.beginAsyncAnalysis(42L))
+                .thenReturn(new AnalysisPreparation(99L, REQUEST));
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SimpleTracer tracer = new SimpleTracer();
+        AnalysisService service = new AnalysisService(
+                persistenceService,
+                mock(IncidentAnalyzerClient.class),
+                mock(AnalysisEventPublisher.class),
+                new AnalysisResultEvaluator(),
+                meterRegistry,
+                tracer,
+                2,
+                Duration.ZERO
+        );
+
+        service.analyzeIncidentAsync(42L);
+
+        assertThat(meterRegistry.counter("incident.analysis.async.requested.total").count())
+                .isEqualTo(1.0d);
+        SimpleSpan span = tracer.onlySpan();
+        assertThat(span.getName()).isEqualTo("analysis.execution.create");
+        assertThat(span.getTags())
+                .containsEntry("analysis.execution.id", "99")
+                .containsEntry("incident.id", "42")
+                .containsEntry("analysis.mode", "async")
+                .containsEntry("analysis.status", "queued");
+    }
+
+    @Test
     void analyzeIncidentAsync_shouldFailExecutionWhenPublishingFails() {
         AnalysisPersistenceService persistenceService = mock(AnalysisPersistenceService.class);
         when(persistenceService.beginAsyncAnalysis(42L))
@@ -367,6 +401,7 @@ class AnalysisServiceTest {
                 publisher,
                 new AnalysisResultEvaluator(),
                 new SimpleMeterRegistry(),
+                Tracer.NOOP,
                 maxAttempts,
                 Duration.ZERO
         );
@@ -384,6 +419,7 @@ class AnalysisServiceTest {
                 mock(AnalysisEventPublisher.class),
                 new AnalysisResultEvaluator(),
                 meterRegistry,
+                Tracer.NOOP,
                 maxAttempts,
                 Duration.ZERO
         );
