@@ -87,6 +87,7 @@ public class AnalysisExecution {
         }
         this.status = AnalysisExecutionStatus.QUEUED;
         this.startedAt = LocalDateTime.now();
+        this.attemptCount = 1;
     }
 
     public void complete(String rootCause, double confidence) {
