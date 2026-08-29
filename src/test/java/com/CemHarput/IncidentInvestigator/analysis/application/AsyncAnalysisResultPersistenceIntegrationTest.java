@@ -17,6 +17,7 @@ import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
 import com.CemHarput.IncidentInvestigator.incident.api.IncidentResponse;
 import com.CemHarput.IncidentInvestigator.incident.application.IncidentService;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -121,7 +122,7 @@ class AsyncAnalysisResultPersistenceIntegrationTest {
                 prepared.incidentId(),
                 "INTERNAL_ERROR",
                 "Analyzer workload failed",
-                LocalDateTime.now()
+                Instant.now()
         );
 
         resultService.processFailed(event);
@@ -194,7 +195,7 @@ class AsyncAnalysisResultPersistenceIntegrationTest {
                 prepared.executionId(),
                 prepared.incidentId(),
                 List.of(candidate),
-                LocalDateTime.now()
+                Instant.now()
         );
     }
 

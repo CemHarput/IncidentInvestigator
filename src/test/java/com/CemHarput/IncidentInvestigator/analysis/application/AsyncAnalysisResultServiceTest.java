@@ -20,7 +20,7 @@ import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentReposi
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.test.simple.SimpleTracer;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -154,7 +154,7 @@ class AsyncAnalysisResultServiceTest {
                 99L,
                 43L,
                 List.of(candidate("DATABASE_CONNECTION_POOL_EXHAUSTION", 0.91d)),
-                LocalDateTime.now()
+                Instant.now()
         );
 
         assertThatThrownBy(() -> fixture.service.processCompleted(event))
@@ -171,7 +171,7 @@ class AsyncAnalysisResultServiceTest {
                 42L,
                 "UNKNOWN_FAILURE_TYPE",
                 "Analyzer failed",
-                LocalDateTime.now()
+                Instant.now()
         );
 
         assertThatThrownBy(() -> fixture.service.processFailed(event))
@@ -221,7 +221,7 @@ class AsyncAnalysisResultServiceTest {
                 99L,
                 42L,
                 candidates,
-                LocalDateTime.now()
+                Instant.now()
         );
     }
 
@@ -232,7 +232,7 @@ class AsyncAnalysisResultServiceTest {
                 42L,
                 "INTERNAL_ERROR",
                 "Analyzer failed",
-                LocalDateTime.now()
+                Instant.now()
         );
     }
 

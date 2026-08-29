@@ -18,7 +18,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,7 +75,7 @@ public class AnalysisService {
                     request.title(),
                     request.incidentType(),
                     request.evidence(),
-                    LocalDateTime.now()
+                    Instant.now()
             );
 
             try {

@@ -20,6 +20,7 @@ import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Properties;
@@ -122,7 +123,7 @@ class AnalysisResultConsumerIntegrationTest {
                         "Connection pool saturation matches the evidence",
                         List.of("HikariPool timeout")
                 )),
-                LocalDateTime.now()
+                Instant.now()
         );
 
         Span parentSpan = tracer.nextSpan().name("test.analysis-result-parent").start();
@@ -161,7 +162,7 @@ class AnalysisResultConsumerIntegrationTest {
                         failedAnalysis.incidentId(),
                         "INTERNAL_ERROR",
                         "Analyzer workload failed",
-                        LocalDateTime.now()
+                        Instant.now()
                 )
         ).get();
 

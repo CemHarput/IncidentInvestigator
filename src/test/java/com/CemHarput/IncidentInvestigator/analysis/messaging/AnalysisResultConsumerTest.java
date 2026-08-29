@@ -12,7 +12,7 @@ import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisCompl
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisFailedEvent;
 import io.micrometer.tracing.test.simple.SimpleSpan;
 import io.micrometer.tracing.test.simple.SimpleTracer;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -32,7 +32,7 @@ class AnalysisResultConsumerTest {
                 99L,
                 42L,
                 List.of(),
-                LocalDateTime.now()
+                Instant.now()
         );
         when(objectMapper.readValue("payload", AnalysisCompletedEvent.class)).thenReturn(event);
         SimpleTracer tracer = new SimpleTracer();
@@ -60,7 +60,7 @@ class AnalysisResultConsumerTest {
                 42L,
                 "INTERNAL_ERROR",
                 "Analyzer failed",
-                LocalDateTime.now()
+                Instant.now()
         );
         when(objectMapper.readValue("payload", AnalysisFailedEvent.class)).thenReturn(event);
         RuntimeException failure = new RuntimeException("Database unavailable");

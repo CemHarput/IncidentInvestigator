@@ -15,7 +15,7 @@ import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.test.simple.SimpleSpan;
 import io.micrometer.tracing.test.simple.SimpleTracer;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -140,7 +140,7 @@ class KafkaAnalysisEventPublisherTest {
                 "Payment service latency",
                 "LATENCY",
                 List.of(),
-                LocalDateTime.now()
+                Instant.now()
         );
     }
 }

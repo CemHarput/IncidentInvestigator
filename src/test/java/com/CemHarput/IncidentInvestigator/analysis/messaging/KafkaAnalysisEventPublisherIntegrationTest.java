@@ -6,6 +6,7 @@ import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisEvidence;
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Properties;
@@ -67,7 +68,7 @@ class KafkaAnalysisEventPublisherIntegrationTest {
                         "HikariPool - Connection is not available",
                         LocalDateTime.of(2026, 8, 24, 12, 0)
                 )),
-                LocalDateTime.now()
+                Instant.now()
         );
 
         try (KafkaConsumer<String, String> consumer = consumer()) {
@@ -91,7 +92,7 @@ class KafkaAnalysisEventPublisherIntegrationTest {
             assertThat(payload.get("evidence")).hasSize(1);
             assertThat(payload.get("evidence").get(0).get("observedAt").asText())
                     .startsWith("2026-08-24T12:00");
-            assertThat(payload.get("requestedAt").asText()).isNotBlank();
+            assertThat(payload.get("requestedAt").asText()).endsWith("Z");
             assertThat(payload.has("traceId")).isFalse();
         }
     }

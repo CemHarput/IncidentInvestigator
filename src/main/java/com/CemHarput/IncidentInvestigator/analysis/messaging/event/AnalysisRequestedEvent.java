@@ -2,7 +2,7 @@ package com.CemHarput.IncidentInvestigator.analysis.messaging.event;
 
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisEvidence;
 import com.fasterxml.jackson.annotation.JsonFormat;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,6 +14,6 @@ public record AnalysisRequestedEvent(
         String incidentType,
         List<AnalysisEvidence> evidence,
         @JsonFormat(shape = JsonFormat.Shape.STRING)
-        LocalDateTime requestedAt
+        Instant requestedAt
 ) {
 }
