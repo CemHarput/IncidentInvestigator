@@ -118,11 +118,20 @@ public class AgentExecution {
     }
 
     public void complete(String resultSummary) {
+        complete(resultSummary, null);
+    }
+
+    public void complete(String resultSummary, UUID resultEventId) {
         requireStatus(AgentExecutionStatus.RUNNING, "Only RUNNING agent executions can complete");
         finish(AgentExecutionStatus.COMPLETED, null, null, resultSummary);
+        this.resultEventId = resultEventId;
     }
 
     public void fail(AgentExecutionFailureType type, String reason) {
+        fail(type, reason, null);
+    }
+
+    public void fail(AgentExecutionFailureType type, String reason, UUID resultEventId) {
         requireNonTerminal();
         finish(
                 AgentExecutionStatus.FAILED,
@@ -130,14 +139,24 @@ public class AgentExecution {
                 reason,
                 null
         );
+        this.resultEventId = resultEventId;
     }
 
     public void timeout(String reason) {
+        timeout(reason, null);
+    }
+
+    public void timeout(String reason, UUID resultEventId) {
         requireStatus(AgentExecutionStatus.RUNNING, "Only RUNNING agent executions can time out");
         finish(AgentExecutionStatus.TIMED_OUT, AgentExecutionFailureType.TIMEOUT, reason, null);
+        this.resultEventId = resultEventId;
     }
 
     public void markStepLimitExceeded() {
+        markStepLimitExceeded(null);
+    }
+
+    public void markStepLimitExceeded(UUID resultEventId) {
         requireStatus(
                 AgentExecutionStatus.RUNNING,
                 "Only RUNNING agent executions can exceed the step limit"
@@ -148,6 +167,7 @@ public class AgentExecution {
                 "Agent execution exceeded the maximum step count of " + this.maxSteps,
                 null
         );
+        this.resultEventId = resultEventId;
     }
 
     private void finish(
@@ -250,5 +270,9 @@ public class AgentExecution {
 
     public UUID getResultEventId() {
         return resultEventId;
+    }
+
+    public boolean hasProcessedResult(UUID eventId) {
+        return eventId != null && eventId.equals(this.resultEventId);
     }
 }
