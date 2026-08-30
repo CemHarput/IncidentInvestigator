@@ -116,7 +116,8 @@ The synchronous analysis path is retained only for comparative benchmark tests a
 - Spring Data JPA / Hibernate
 - PostgreSQL 15
 - Apache Kafka 4.3.1
-- Spring Boot Actuator and Micrometer
+- Spring Boot Actuator, Micrometer, and OpenTelemetry
+- OpenTelemetry Collector, Jaeger, and Prometheus
 - springdoc OpenAPI / Swagger UI
 - Testcontainers (PostgreSQL and Kafka)
 - Maven Wrapper
@@ -128,7 +129,7 @@ The synchronous analysis path is retained only for comparative benchmark tests a
 - JDK 26
 - Docker with Docker Compose
 
-Start PostgreSQL and Kafka:
+Start PostgreSQL, Kafka, and the observability stack:
 
 ```powershell
 docker compose up -d
@@ -150,6 +151,7 @@ The application starts on `http://localhost:8080`. The default configuration exp
 
 - PostgreSQL at `localhost:5432` with database `incidentdb`.
 - Kafka at `localhost:9092`.
+- OpenTelemetry Collector at `localhost:4318` for OTLP/HTTP traces and metrics.
 - An external analysis worker that consumes requests and publishes results.
 
 The HTTP analyzer at `http://localhost:8000` is needed only when running synchronous-versus-asynchronous benchmark tests.
@@ -160,6 +162,63 @@ Useful development URLs:
 - OpenAPI document: `http://localhost:8080/v3/api-docs`
 - Health: `http://localhost:8080/actuator/health`
 - Metrics: `http://localhost:8080/actuator/metrics`
+- Jaeger UI: `http://localhost:16686`
+- Prometheus UI: `http://localhost:9090`
+
+## Observability
+
+V5 provides traces, metrics, and trace-correlated logs. The Spring application exports traces and metrics over OTLP/HTTP to the OpenTelemetry Collector. The collector forwards traces to Jaeger and exposes application metrics for Prometheus to scrape.
+
+```text
+Spring Boot -- OTLP/HTTP --> OpenTelemetry Collector -- traces --> Jaeger
+                                                  `-- metrics --> Prometheus
+```
+
+The observability services are included in `docker-compose.yml` and start with the rest of the local infrastructure:
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+| Service | Local address | Purpose |
+| --- | --- | --- |
+| OpenTelemetry Collector | OTLP gRPC `localhost:4317`, OTLP HTTP `localhost:4318` | Receives telemetry from the application and worker |
+| Collector health check | `http://localhost:13133` | Reports collector health |
+| Jaeger | `http://localhost:16686` | Searches and visualizes distributed traces |
+| Prometheus | `http://localhost:9090` | Queries application metrics exported by the collector |
+
+The Java service uses the following environment variables. All are optional for the local Compose setup.
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `OTEL_SERVICE_NAME` | `incident-investigator` | OpenTelemetry service name |
+| `OTEL_SERVICE_VERSION` | `v5` | Service version resource attribute |
+| `OTEL_DEPLOYMENT_ENVIRONMENT` | `local` | Deployment environment resource attribute |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP/HTTP trace endpoint |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | `http://localhost:4318/v1/metrics` | OTLP/HTTP metric endpoint |
+| `OTEL_TRACES_SAMPLER_ARG` | `1.0` | Trace sampling probability from `0.0` to `1.0` |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `15s` | Metric export interval |
+
+For example, PowerShell users can override the service identity and sampling before starting the application:
+
+```powershell
+$env:OTEL_SERVICE_NAME = "incident-investigator-local"
+$env:OTEL_DEPLOYMENT_ENVIRONMENT = "development"
+$env:OTEL_TRACES_SAMPLER_ARG = "0.25"
+.\mvnw.cmd spring-boot:run
+```
+
+To verify an asynchronous trace end to end:
+
+1. Start the Compose stack, the Java application, and the external analysis worker.
+2. Create an incident, start its investigation, and add evidence.
+3. Call `POST /api/v1/incidents/{id}/analyze-async`.
+4. Poll `GET /api/v1/analyses/{executionId}` until the execution reaches a terminal status.
+5. Open Jaeger, select the configured service name, and find the trace for the async request. It should continue through the Kafka request, worker analysis, Kafka result, and Spring result persistence stages when the worker propagates the W3C trace context.
+6. Open Prometheus and query an application metric such as `incident_analysis_async_requested_total`.
+
+Application log lines include `traceId`, `spanId`, `executionId`, and `incidentId` correlation fields when those values are available.
 
 ## API
 
@@ -209,6 +268,13 @@ The defaults are defined in `src/main/resources/application.properties`.
 | `analysis.kafka.result-consumer-group` | `incident-investigator-analysis-results-v1` | Result consumer group |
 | `analysis.kafka.consumer.max-attempts` | `3` | Total result-processing attempts |
 | `analysis.kafka.consumer.retry-backoff` | `500ms` | Delay between consumer attempts |
+| `management.opentelemetry.resource-attributes.service.name` | `${OTEL_SERVICE_NAME:incident-investigator}` | OpenTelemetry service name |
+| `management.opentelemetry.resource-attributes.service.version` | `${OTEL_SERVICE_VERSION:v5}` | OpenTelemetry service version |
+| `management.opentelemetry.resource-attributes.deployment.environment` | `${OTEL_DEPLOYMENT_ENVIRONMENT:local}` | Deployment environment |
+| `management.opentelemetry.tracing.export.otlp.endpoint` | `${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}` | OTLP/HTTP trace endpoint |
+| `management.tracing.sampling.probability` | `${OTEL_TRACES_SAMPLER_ARG:1.0}` | Trace sampling probability |
+| `management.otlp.metrics.export.url` | `${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}` | OTLP/HTTP metric endpoint |
+| `management.otlp.metrics.export.step` | `${OTEL_METRIC_EXPORT_INTERVAL:15s}` | Metric export interval |
 
 Database connection settings are also present in the same file and match `docker-compose.yml`.
 
