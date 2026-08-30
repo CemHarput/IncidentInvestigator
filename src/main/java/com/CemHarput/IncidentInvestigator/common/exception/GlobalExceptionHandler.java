@@ -1,5 +1,9 @@
 package com.CemHarput.IncidentInvestigator.common.exception;
 
+import com.CemHarput.IncidentInvestigator.agent.exception.AgentDefinitionNotFoundException;
+import com.CemHarput.IncidentInvestigator.agent.exception.AgentExecutionAlreadyRunningException;
+import com.CemHarput.IncidentInvestigator.agent.exception.AgentExecutionMessagingException;
+import com.CemHarput.IncidentInvestigator.agent.exception.AgentExecutionNotAllowedException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisAlreadyRunningException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisNotAllowedException;
 import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingException;
@@ -19,6 +23,48 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(AgentDefinitionNotFoundException.class)
+    public ResponseEntity<ApiError> handleAgentDefinitionNotFound(AgentDefinitionNotFoundException ex) {
+        ApiError error = new ApiError(
+                "AGENT_NOT_FOUND",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    }
+
+    @ExceptionHandler(AgentExecutionNotAllowedException.class)
+    public ResponseEntity<ApiError> handleAgentExecutionNotAllowed(AgentExecutionNotAllowedException ex) {
+        ApiError error = new ApiError(
+                "AGENT_EXECUTION_NOT_ALLOWED",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler(AgentExecutionAlreadyRunningException.class)
+    public ResponseEntity<ApiError> handleAgentExecutionAlreadyRunning(
+            AgentExecutionAlreadyRunningException ex
+    ) {
+        ApiError error = new ApiError(
+                "AGENT_EXECUTION_ALREADY_RUNNING",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    @ExceptionHandler(AgentExecutionMessagingException.class)
+    public ResponseEntity<ApiError> handleAgentExecutionMessaging(AgentExecutionMessagingException ex) {
+        ApiError error = new ApiError(
+                "AGENT_EXECUTION_MESSAGING_UNAVAILABLE",
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+    }
 
     @ExceptionHandler(IncidentNotFoundException.class)
     public ResponseEntity<ApiError> handleIncidentNotFound(IncidentNotFoundException ex) {
