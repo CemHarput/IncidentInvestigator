@@ -3,13 +3,18 @@ package com.CemHarput.IncidentInvestigator.analysis.application;
 import com.CemHarput.IncidentInvestigator.analysis.dto.AnalysisResponse;
 import com.CemHarput.IncidentInvestigator.analysis.dto.RootCauseCandidateResponse;
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerResponseException;
+import com.CemHarput.IncidentInvestigator.incident.domain.RootCauseDecisionPolicy;
 import java.util.Comparator;
 import org.springframework.stereotype.Component;
 
 @Component
 public class AnalysisResultEvaluator {
 
-    private static final double MIN_CONFIDENCE = 0.60d;
+    private final RootCauseDecisionPolicy rootCauseDecisionPolicy;
+
+    public AnalysisResultEvaluator(RootCauseDecisionPolicy rootCauseDecisionPolicy) {
+        this.rootCauseDecisionPolicy = rootCauseDecisionPolicy;
+    }
 
     public Evaluation evaluate(Long expectedIncidentId, AnalysisResponse response) {
         validateResponse(expectedIncidentId, response);
@@ -18,7 +23,13 @@ public class AnalysisResultEvaluator {
                 .orElseThrow(() -> new InvalidAnalyzerResponseException(
                         "Analyzer returned no root cause candidates"
                 ));
-        return new Evaluation(bestCandidate, isInconclusive(bestCandidate));
+        return new Evaluation(
+                bestCandidate,
+                rootCauseDecisionPolicy.isInconclusive(
+                        bestCandidate.rootCause(),
+                        bestCandidate.confidence()
+                )
+        );
     }
 
     private void validateResponse(Long expectedIncidentId, AnalysisResponse response) {
@@ -57,11 +68,6 @@ public class AnalysisResultEvaluator {
                 );
             }
         }
-    }
-
-    private boolean isInconclusive(RootCauseCandidateResponse candidate) {
-        return "UNKNOWN".equalsIgnoreCase(candidate.rootCause())
-                || candidate.confidence() < MIN_CONFIDENCE;
     }
 
     public record Evaluation(

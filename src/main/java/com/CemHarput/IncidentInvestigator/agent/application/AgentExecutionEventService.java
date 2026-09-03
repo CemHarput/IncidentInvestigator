@@ -15,6 +15,7 @@ import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionSt
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentResult;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
 import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
+import com.CemHarput.IncidentInvestigator.incident.domain.RootCauseDecisionPolicy;
 import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundException;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import java.time.LocalDateTime;
@@ -31,17 +32,20 @@ public class AgentExecutionEventService {
     private final AgentExecutionStepRepository stepRepository;
     private final ProcessedAgentEventRepository processedEventRepository;
     private final IncidentRepository incidentRepository;
+    private final RootCauseDecisionPolicy rootCauseDecisionPolicy;
 
     public AgentExecutionEventService(
             AgentExecutionRepository executionRepository,
             AgentExecutionStepRepository stepRepository,
             ProcessedAgentEventRepository processedEventRepository,
-            IncidentRepository incidentRepository
+            IncidentRepository incidentRepository,
+            RootCauseDecisionPolicy rootCauseDecisionPolicy
     ) {
         this.executionRepository = executionRepository;
         this.stepRepository = stepRepository;
         this.processedEventRepository = processedEventRepository;
         this.incidentRepository = incidentRepository;
+        this.rootCauseDecisionPolicy = rootCauseDecisionPolicy;
     }
 
     @Transactional
@@ -100,7 +104,10 @@ public class AgentExecutionEventService {
         requireCompletedStepCount(execution, event.totalSteps());
 
         AgentResult result = event.result();
-        if (!"UNKNOWN".equalsIgnoreCase(result.rootCause())) {
+        if (!rootCauseDecisionPolicy.isInconclusive(
+                result.rootCause(),
+                result.confidence()
+        )) {
             Long incidentId = execution.getIncidentId();
             if (incidentId == null) {
                 throw new IllegalStateException(

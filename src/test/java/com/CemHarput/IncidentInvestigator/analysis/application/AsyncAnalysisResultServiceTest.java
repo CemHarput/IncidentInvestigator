@@ -16,6 +16,7 @@ import com.CemHarput.IncidentInvestigator.analysis.infrastructure.AnalysisExecut
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisCompletedEvent;
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisFailedEvent;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
+import com.CemHarput.IncidentInvestigator.incident.domain.RootCauseDecisionPolicy;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.tracing.Tracer;
@@ -198,7 +199,7 @@ class AsyncAnalysisResultServiceTest {
         AsyncAnalysisResultService service = new AsyncAnalysisResultService(
                 executionRepository,
                 incidentRepository,
-                new AnalysisResultEvaluator(),
+                new AnalysisResultEvaluator(new RootCauseDecisionPolicy()),
                 meterRegistry,
                 tracer
         );

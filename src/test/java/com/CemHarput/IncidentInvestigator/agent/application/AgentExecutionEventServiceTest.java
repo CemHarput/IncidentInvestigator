@@ -24,6 +24,7 @@ import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionFa
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionStepEvent;
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentResult;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
+import com.CemHarput.IncidentInvestigator.incident.domain.RootCauseDecisionPolicy;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
 import java.time.Duration;
 import java.time.Instant;
@@ -150,6 +151,24 @@ class AgentExecutionEventServiceTest {
     }
 
     @Test
+    void processCompleted_shouldKeepIncidentUnchangedForLowConfidenceResult() {
+        Fixtures fixtures = fixtures(queuedExecution());
+        AgentExecutionCompletedEvent event = new AgentExecutionCompletedEvent(
+                UUID.randomUUID(),
+                99L,
+                "incident-root-cause-agent",
+                result("DATABASE_PROBLEM", 0.15d),
+                0,
+                Instant.now()
+        );
+
+        fixtures.service().processCompleted(event);
+
+        assertThat(fixtures.execution().getStatus()).isEqualTo(AgentExecutionStatus.COMPLETED);
+        verify(fixtures.incidentRepository(), never()).findByIdForAnalysis(any());
+    }
+
+    @Test
     void processCompleted_shouldWaitForEntireAuditHistory() {
         Fixtures fixtures = fixtures(queuedExecution());
         AgentExecutionCompletedEvent event = new AgentExecutionCompletedEvent(
@@ -220,7 +239,8 @@ class AgentExecutionEventServiceTest {
                 executionRepository,
                 stepRepository,
                 processedRepository,
-                incidentRepository
+                incidentRepository,
+                new RootCauseDecisionPolicy()
         );
         return new Fixtures(
                 service,
@@ -254,9 +274,13 @@ class AgentExecutionEventServiceTest {
     }
 
     private AgentResult result(String rootCause) {
+        return result(rootCause, "UNKNOWN".equals(rootCause) ? 0.1d : 0.91d);
+    }
+
+    private AgentResult result(String rootCause, double confidence) {
         return new AgentResult(
                 rootCause,
-                "UNKNOWN".equals(rootCause) ? 0.1d : 0.91d,
+                confidence,
                 "Database connection pool saturation matches the evidence.",
                 List.of("connection timeout")
         );

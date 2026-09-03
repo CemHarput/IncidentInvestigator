@@ -23,6 +23,7 @@ import com.CemHarput.IncidentInvestigator.analysis.exception.AnalysisMessagingEx
 import com.CemHarput.IncidentInvestigator.analysis.exception.InvalidAnalyzerRequestException;
 import com.CemHarput.IncidentInvestigator.analysis.messaging.AnalysisEventPublisher;
 import com.CemHarput.IncidentInvestigator.analysis.messaging.event.AnalysisRequestedEvent;
+import com.CemHarput.IncidentInvestigator.incident.domain.RootCauseDecisionPolicy;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.tracing.Tracer;
@@ -232,7 +233,7 @@ class AnalysisServiceTest {
                 persistenceService,
                 mock(IncidentAnalyzerClient.class),
                 mock(AnalysisEventPublisher.class),
-                new AnalysisResultEvaluator(),
+                new AnalysisResultEvaluator(new RootCauseDecisionPolicy()),
                 meterRegistry,
                 tracer,
                 2,
@@ -399,7 +400,7 @@ class AnalysisServiceTest {
                 persistenceService,
                 client,
                 publisher,
-                new AnalysisResultEvaluator(),
+                new AnalysisResultEvaluator(new RootCauseDecisionPolicy()),
                 new SimpleMeterRegistry(),
                 Tracer.NOOP,
                 maxAttempts,
@@ -417,7 +418,7 @@ class AnalysisServiceTest {
                 persistenceService,
                 client,
                 mock(AnalysisEventPublisher.class),
-                new AnalysisResultEvaluator(),
+                new AnalysisResultEvaluator(new RootCauseDecisionPolicy()),
                 meterRegistry,
                 Tracer.NOOP,
                 maxAttempts,
