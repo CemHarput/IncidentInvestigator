@@ -18,34 +18,48 @@ import com.CemHarput.IncidentInvestigator.incident.domain.RootCause;
 import com.CemHarput.IncidentInvestigator.incident.domain.RootCauseDecisionPolicy;
 import com.CemHarput.IncidentInvestigator.incident.exception.IncidentNotFoundException;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AgentExecutionEventService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentExecutionEventService.class);
+
     private final AgentExecutionRepository executionRepository;
     private final AgentExecutionStepRepository stepRepository;
     private final ProcessedAgentEventRepository processedEventRepository;
     private final IncidentRepository incidentRepository;
     private final RootCauseDecisionPolicy rootCauseDecisionPolicy;
+    private final MeterRegistry meterRegistry;
+    private final Tracer tracer;
 
     public AgentExecutionEventService(
             AgentExecutionRepository executionRepository,
             AgentExecutionStepRepository stepRepository,
             ProcessedAgentEventRepository processedEventRepository,
             IncidentRepository incidentRepository,
-            RootCauseDecisionPolicy rootCauseDecisionPolicy
+            RootCauseDecisionPolicy rootCauseDecisionPolicy,
+            MeterRegistry meterRegistry,
+            Tracer tracer
     ) {
         this.executionRepository = executionRepository;
         this.stepRepository = stepRepository;
         this.processedEventRepository = processedEventRepository;
         this.incidentRepository = incidentRepository;
         this.rootCauseDecisionPolicy = rootCauseDecisionPolicy;
+        this.meterRegistry = meterRegistry;
+        this.tracer = tracer;
     }
 
     @Transactional
@@ -75,11 +89,12 @@ public class AgentExecutionEventService {
             );
         }
 
+        AgentExecutionStepType stepType = parseStepType(event.stepType());
         AgentExecutionStep step = AgentExecutionStep.completed(
                 event.eventId(),
                 execution.getId(),
                 event.stepNumber(),
-                parseStepType(event.stepType()),
+                stepType,
                 event.capability(),
                 null,
                 event.observationSummary(),
@@ -89,12 +104,29 @@ public class AgentExecutionEventService {
         stepRepository.save(step);
         execution.advanceStep();
         markProcessed(event.eventId(), execution.getId(), "STEP");
+        recordStepMetricsBestEffort(execution, stepType);
     }
 
     @Transactional
     public void processCompleted(AgentExecutionCompletedEvent event) {
+        Span span = persistResultSpan(
+                event == null ? null : event.executionId(),
+                "COMPLETED"
+        );
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            processCompletedInternal(event, span);
+        } catch (RuntimeException ex) {
+            span.error(ex);
+            throw ex;
+        } finally {
+            span.end();
+        }
+    }
+
+    private void processCompletedInternal(AgentExecutionCompletedEvent event, Span span) {
         validateCompletedEvent(event);
         AgentExecution execution = findExecutionForUpdate(event.executionId());
+        tagExecution(span, execution);
         if (isDuplicate(event.eventId(), execution.getId())) {
             return;
         }
@@ -104,10 +136,11 @@ public class AgentExecutionEventService {
         requireCompletedStepCount(execution, event.totalSteps());
 
         AgentResult result = event.result();
-        if (!rootCauseDecisionPolicy.isInconclusive(
+        boolean inconclusive = rootCauseDecisionPolicy.isInconclusive(
                 result.rootCause(),
                 result.confidence()
-        )) {
+        );
+        if (!inconclusive) {
             Long incidentId = execution.getIncidentId();
             if (incidentId == null) {
                 throw new IllegalStateException(
@@ -125,12 +158,32 @@ public class AgentExecutionEventService {
 
         execution.complete(result.explanation(), event.eventId());
         markProcessed(event.eventId(), execution.getId(), "COMPLETED");
+        String outcome = inconclusive ? "INCONCLUSIVE" : "COMPLETED";
+        span.tag("agent.execution.status", execution.getStatus().name());
+        span.tag("agent.result.outcome", outcome);
+        recordCompletedMetricsBestEffort(execution, outcome);
     }
 
     @Transactional
     public void processFailed(AgentExecutionFailedEvent event) {
+        Span span = persistResultSpan(
+                event == null ? null : event.executionId(),
+                "FAILED"
+        );
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            processFailedInternal(event, span);
+        } catch (RuntimeException ex) {
+            span.error(ex);
+            throw ex;
+        } finally {
+            span.end();
+        }
+    }
+
+    private void processFailedInternal(AgentExecutionFailedEvent event, Span span) {
         validateFailedEvent(event);
         AgentExecution execution = findExecutionForUpdate(event.executionId());
+        tagExecution(span, execution);
         if (isDuplicate(event.eventId(), execution.getId())) {
             return;
         }
@@ -146,6 +199,101 @@ public class AgentExecutionEventService {
             default -> execution.fail(failureType, event.failureReason(), event.eventId());
         }
         markProcessed(event.eventId(), execution.getId(), "FAILED");
+        span.tag("agent.execution.status", execution.getStatus().name());
+        span.tag("agent.failure.type", failureType.name());
+        recordFailedMetricsBestEffort(execution, failureType);
+    }
+
+    private Span persistResultSpan(Long executionId, String eventType) {
+        Span span = tracer.nextSpan().name("agent.execution.persist-result").start();
+        span.tag("agent.event.type", eventType);
+        if (executionId != null) {
+            span.tag("agent.execution.id", executionId.toString());
+        }
+        return span;
+    }
+
+    private void tagExecution(Span span, AgentExecution execution) {
+        span.tag("agent.name", execution.getAgentName());
+        if (execution.getIncidentId() != null) {
+            span.tag("incident.id", execution.getIncidentId().toString());
+        }
+    }
+
+    private void recordCompletedMetricsBestEffort(
+            AgentExecution execution,
+            String outcome
+    ) {
+        try {
+            meterRegistry.counter(
+                    "agent.execution.completed",
+                    "agent_name",
+                    execution.getAgentName(),
+                    "outcome",
+                    outcome
+            ).increment();
+            recordDuration(execution);
+        } catch (RuntimeException ex) {
+            logMetricsFailure(execution, ex);
+        }
+    }
+
+    private void recordFailedMetricsBestEffort(
+            AgentExecution execution,
+            AgentExecutionFailureType failureType
+    ) {
+        try {
+            meterRegistry.counter(
+                    "agent.execution.failed",
+                    "agent_name",
+                    execution.getAgentName(),
+                    "failure_type",
+                    failureType.name()
+            ).increment();
+            recordDuration(execution);
+        } catch (RuntimeException ex) {
+            logMetricsFailure(execution, ex);
+        }
+    }
+
+    private void recordDuration(AgentExecution execution) {
+        if (execution.getDurationMs() != null) {
+            meterRegistry.timer(
+                    "agent.execution.duration",
+                    "agent_name",
+                    execution.getAgentName(),
+                    "status",
+                    execution.getStatus().name()
+            ).record(Duration.ofMillis(execution.getDurationMs()));
+        }
+    }
+
+    private void recordStepMetricsBestEffort(
+            AgentExecution execution,
+            AgentExecutionStepType stepType
+    ) {
+        try {
+            meterRegistry.counter(
+                    "agent.execution.steps",
+                    "agent_name",
+                    execution.getAgentName(),
+                    "status",
+                    execution.getStatus().name(),
+                    "step_type",
+                    stepType.name()
+            ).increment();
+        } catch (RuntimeException ex) {
+            logMetricsFailure(execution, ex);
+        }
+    }
+
+    private void logMetricsFailure(AgentExecution execution, RuntimeException error) {
+        LOGGER.warn(
+                "Failed to record agent execution metrics executionId={} status={}",
+                execution.getId(),
+                execution.getStatus(),
+                error
+        );
     }
 
     private AgentExecution findExecutionForUpdate(Long executionId) {

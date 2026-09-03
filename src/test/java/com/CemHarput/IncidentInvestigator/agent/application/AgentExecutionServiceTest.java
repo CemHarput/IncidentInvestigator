@@ -14,6 +14,9 @@ import com.CemHarput.IncidentInvestigator.agent.messaging.AgentExecutionEventPub
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionRequestedEvent;
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentInput;
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentLimitsContract;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.test.simple.SimpleSpan;
+import io.micrometer.tracing.test.simple.SimpleTracer;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -31,7 +34,14 @@ class AgentExecutionServiceTest {
                 any(UUID.class)
         )).thenReturn(new AgentExecutionPreparation(event));
         AgentExecutionEventPublisher publisher = mock(AgentExecutionEventPublisher.class);
-        AgentExecutionService service = new AgentExecutionService(persistence, publisher);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SimpleTracer tracer = new SimpleTracer();
+        AgentExecutionService service = new AgentExecutionService(
+                persistence,
+                publisher,
+                meterRegistry,
+                tracer
+        );
 
         AgentExecutionAcceptedResponse response = service.createExecution(
                 "incident-root-cause-agent",
@@ -44,6 +54,17 @@ class AgentExecutionServiceTest {
                 "QUEUED"
         ));
         verify(publisher).publishRequested(event);
+        assertThat(meterRegistry.find("agent.execution.requested")
+                .tag("agent_name", "incident-root-cause-agent")
+                .tag("status", "QUEUED")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        SimpleSpan span = tracer.onlySpan();
+        assertThat(span.getName()).isEqualTo("agent.execution.create");
+        assertThat(span.getTags())
+                .containsEntry("agent.execution.id", "99")
+                .containsEntry("agent.execution.status", "QUEUED")
+                .containsEntry("incident.id", "42");
     }
 
     @Test
@@ -58,7 +79,12 @@ class AgentExecutionServiceTest {
                 new RuntimeException("Kafka unavailable")
         );
         doThrow(failure).when(publisher).publishRequested(event);
-        AgentExecutionService service = new AgentExecutionService(persistence, publisher);
+        AgentExecutionService service = new AgentExecutionService(
+                persistence,
+                publisher,
+                new SimpleMeterRegistry(),
+                new SimpleTracer()
+        );
 
         assertThatThrownBy(() -> service.createExecution("incident-root-cause-agent", 42L))
                 .isSameAs(failure);

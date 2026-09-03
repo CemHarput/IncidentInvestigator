@@ -26,6 +26,9 @@ import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentResult;
 import com.CemHarput.IncidentInvestigator.incident.domain.Incident;
 import com.CemHarput.IncidentInvestigator.incident.domain.RootCauseDecisionPolicy;
 import com.CemHarput.IncidentInvestigator.incident.infrastructure.IncidentRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.tracing.test.simple.SimpleSpan;
+import io.micrometer.tracing.test.simple.SimpleTracer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -64,6 +67,11 @@ class AgentExecutionEventServiceTest {
         assertThat(stepCaptor.getValue().getObservationSummary())
                 .isEqualTo("Connection pool timeout signatures detected.");
         verify(fixtures.processedRepository()).save(any(ProcessedAgentEvent.class));
+        assertThat(fixtures.meterRegistry().find("agent.execution.steps")
+                .tag("agent_name", "incident-root-cause-agent")
+                .tag("step_type", "OBSERVATION")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -130,6 +138,21 @@ class AgentExecutionEventServiceTest {
         assertThat(fixtures.execution().getResultEventId()).isEqualTo(eventId);
         assertThat(incident.getRootCause().getRootCauseType())
                 .isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
+        assertThat(fixtures.meterRegistry()
+                .find("agent.execution.completed")
+                .tag("outcome", "COMPLETED")
+                .counter()
+                .count()).isEqualTo(1.0d);
+        assertThat(fixtures.meterRegistry()
+                .find("agent.execution.duration")
+                .tag("status", "COMPLETED")
+                .timer()
+                .count()).isEqualTo(1L);
+        SimpleSpan span = fixtures.tracer().onlySpan();
+        assertThat(span.getName()).isEqualTo("agent.execution.persist-result");
+        assertThat(span.getTags())
+                .containsEntry("agent.execution.id", "99")
+                .containsEntry("agent.result.outcome", "COMPLETED");
     }
 
     @Test
@@ -148,6 +171,11 @@ class AgentExecutionEventServiceTest {
 
         assertThat(fixtures.execution().getStatus()).isEqualTo(AgentExecutionStatus.COMPLETED);
         verify(fixtures.incidentRepository(), never()).findByIdForAnalysis(any());
+        assertThat(fixtures.meterRegistry()
+                .find("agent.execution.completed")
+                .tag("outcome", "INCONCLUSIVE")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -225,6 +253,11 @@ class AgentExecutionEventServiceTest {
         assertThat(fixtures.execution().getStatus()).isEqualTo(AgentExecutionStatus.FAILED);
         assertThat(fixtures.execution().getFailureType())
                 .isEqualTo(AgentExecutionFailureType.CAPABILITY_FAILURE);
+        assertThat(fixtures.meterRegistry()
+                .find("agent.execution.failed")
+                .tag("failure_type", "CAPABILITY_FAILURE")
+                .counter()
+                .count()).isEqualTo(1.0d);
     }
 
     private Fixtures fixtures(AgentExecution execution) {
@@ -233,6 +266,8 @@ class AgentExecutionEventServiceTest {
         ProcessedAgentEventRepository processedRepository =
                 mock(ProcessedAgentEventRepository.class);
         IncidentRepository incidentRepository = mock(IncidentRepository.class);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        SimpleTracer tracer = new SimpleTracer();
         when(executionRepository.findByIdForUpdate(99L)).thenReturn(Optional.of(execution));
         when(processedRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
         AgentExecutionEventService service = new AgentExecutionEventService(
@@ -240,14 +275,18 @@ class AgentExecutionEventServiceTest {
                 stepRepository,
                 processedRepository,
                 incidentRepository,
-                new RootCauseDecisionPolicy()
+                new RootCauseDecisionPolicy(),
+                meterRegistry,
+                tracer
         );
         return new Fixtures(
                 service,
                 execution,
                 stepRepository,
                 processedRepository,
-                incidentRepository
+                incidentRepository,
+                meterRegistry,
+                tracer
         );
     }
 
@@ -291,7 +330,9 @@ class AgentExecutionEventServiceTest {
             AgentExecution execution,
             AgentExecutionStepRepository stepRepository,
             ProcessedAgentEventRepository processedRepository,
-            IncidentRepository incidentRepository
+            IncidentRepository incidentRepository,
+            SimpleMeterRegistry meterRegistry,
+            SimpleTracer tracer
     ) {
     }
 }
