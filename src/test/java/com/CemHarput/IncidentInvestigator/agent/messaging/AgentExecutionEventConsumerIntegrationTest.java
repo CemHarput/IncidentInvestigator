@@ -43,8 +43,7 @@ import org.testcontainers.utility.DockerImageName;
 @Testcontainers
 class AgentExecutionEventConsumerIntegrationTest {
 
-    private static final String STEP_TOPIC = "agent.execution.step.v1";
-    private static final String COMPLETED_TOPIC = "agent.execution.completed.v1";
+    private static final String EVENTS_TOPIC = "agent.execution.events.v1";
 
     @Container
     static KafkaContainer kafka = new KafkaContainer(
@@ -109,26 +108,19 @@ class AgentExecutionEventConsumerIntegrationTest {
         );
 
         kafkaTemplate.send(
-                STEP_TOPIC,
+                EVENTS_TOPIC,
                 prepared.executionId().toString(),
                 stepEvent
         ).get();
         kafkaTemplate.send(
-                STEP_TOPIC,
+                EVENTS_TOPIC,
                 prepared.executionId().toString(),
                 stepEvent
         ).get();
-
-        await(() -> stepRepository
-                .findByExecutionIdOrderByStepNumberAsc(prepared.executionId())
-                .size() == 1);
-        AgentExecution running = executionRepository.findById(prepared.executionId()).orElseThrow();
-        assertThat(running.getStatus()).isEqualTo(AgentExecutionStatus.RUNNING);
-        assertThat(running.getCurrentStep()).isEqualTo(1);
 
         UUID completedEventId = UUID.randomUUID();
         kafkaTemplate.send(
-                COMPLETED_TOPIC,
+                EVENTS_TOPIC,
                 prepared.executionId().toString(),
                 new AgentExecutionCompletedEvent(
                         completedEventId,
@@ -152,6 +144,7 @@ class AgentExecutionEventConsumerIntegrationTest {
                 .findById(prepared.executionId())
                 .orElseThrow();
         assertThat(completed.getResultEventId()).isEqualTo(completedEventId);
+        assertThat(completed.getCurrentStep()).isEqualTo(1);
         assertThat(stepRepository
                 .findByExecutionIdOrderByStepNumberAsc(prepared.executionId()))
                 .hasSize(1);

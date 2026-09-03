@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record AgentExecutionFailedEvent(
+        String eventType,
         UUID eventId,
         Long executionId,
         String agentName,
@@ -14,4 +15,24 @@ public record AgentExecutionFailedEvent(
         @JsonFormat(shape = JsonFormat.Shape.STRING)
         Instant failedAt
 ) {
+    public AgentExecutionFailedEvent(
+            UUID eventId,
+            Long executionId,
+            String agentName,
+            String failureType,
+            String failureReason,
+            int completedSteps,
+            Instant failedAt
+    ) {
+        this(
+                "FAILED",
+                eventId,
+                executionId,
+                agentName,
+                failureType,
+                failureReason,
+                completedSteps,
+                failedAt
+        );
+    }
 }

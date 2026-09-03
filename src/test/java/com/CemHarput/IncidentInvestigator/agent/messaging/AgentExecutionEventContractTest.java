@@ -23,6 +23,7 @@ class AgentExecutionEventContractTest {
     void shouldDeserializePythonStepEventContract() throws Exception {
         String payload = """
                 {
+                  "eventType": "STEP",
                   "eventId": "3846772d-dc25-43f6-a68b-d100302f82f1",
                   "executionId": 99,
                   "stepNumber": 3,
@@ -40,6 +41,7 @@ class AgentExecutionEventContractTest {
         );
 
         assertThat(event.stepNumber()).isEqualTo(3);
+        assertThat(event.eventType()).isEqualTo("STEP");
         assertThat(event.occurredAt()).isEqualTo(Instant.parse("2026-08-30T11:01:00Z"));
     }
 
@@ -61,6 +63,7 @@ class AgentExecutionEventContractTest {
 
         JsonNode payload = objectMapper.readTree(objectMapper.writeValueAsString(event));
 
+        assertThat(payload.get("eventType").asText()).isEqualTo("COMPLETED");
         assertThat(payload.get("completedAt").asText()).isEqualTo("2026-08-30T11:02:00Z");
         assertThat(payload.get("result").get("rootCause").asText())
                 .isEqualTo("DATABASE_CONNECTION_POOL_EXHAUSTION");
@@ -70,6 +73,7 @@ class AgentExecutionEventContractTest {
     void shouldDeserializeFailedEventContract() throws Exception {
         String payload = """
                 {
+                  "eventType": "FAILED",
                   "eventId": "3846772d-dc25-43f6-a68b-d100302f82f1",
                   "executionId": 99,
                   "agentName": "incident-root-cause-agent",
