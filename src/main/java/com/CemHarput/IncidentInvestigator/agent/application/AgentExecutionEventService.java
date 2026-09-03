@@ -229,6 +229,8 @@ public class AgentExecutionEventService {
                     "agent.execution.completed",
                     "agent_name",
                     execution.getAgentName(),
+                    "status",
+                    execution.getStatus().name(),
                     "outcome",
                     outcome
             ).increment();
@@ -247,6 +249,8 @@ public class AgentExecutionEventService {
                     "agent.execution.failed",
                     "agent_name",
                     execution.getAgentName(),
+                    "status",
+                    execution.getStatus().name(),
                     "failure_type",
                     failureType.name()
             ).increment();

@@ -169,6 +169,14 @@ Useful development URLs:
 
 V5 provides traces, metrics, and trace-correlated logs. The Spring application exports traces and metrics over OTLP/HTTP to the OpenTelemetry Collector. The collector forwards traces to Jaeger and exposes application metrics for Prometheus to scrape.
 
+The V6 agent flow adds the business spans `agent.execution.create`,
+`agent.runtime.execute`, `agent.plan`, `agent.capability.execute`,
+`agent.step.publish`, `agent.result.publish`, `agent.result.consume`, and
+`agent.execution.persist-result`. Java exports `agent.execution.requested`,
+`agent.execution.completed`, `agent.execution.failed`,
+`agent.execution.duration`, and `agent.execution.steps`; execution IDs remain
+trace attributes and are not used as metric labels.
+
 ```text
 Spring Boot -- OTLP/HTTP --> OpenTelemetry Collector -- traces --> Jaeger
                                                   `-- metrics --> Prometheus
