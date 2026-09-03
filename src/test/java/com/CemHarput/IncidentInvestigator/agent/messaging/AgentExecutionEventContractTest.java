@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionCompletedEvent;
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionFailedEvent;
+import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionRequestedEvent;
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentExecutionStepEvent;
+import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentInput;
+import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentLimitsContract;
 import com.CemHarput.IncidentInvestigator.agent.messaging.event.AgentResult;
 import java.time.Instant;
 import java.util.List;
@@ -18,6 +21,25 @@ class AgentExecutionEventContractTest {
     private final JsonMapper objectMapper = JsonMapper.builder()
             .findAndAddModules()
             .build();
+
+    @Test
+    void requestedEventShouldSerializeConfiguredCapabilities() throws Exception {
+        AgentExecutionRequestedEvent event = new AgentExecutionRequestedEvent(
+                UUID.randomUUID(),
+                99L,
+                "incident-root-cause-agent",
+                "1.0",
+                List.of("log-analyzer", "metric-analyzer"),
+                new AgentLimitsContract(10, 60),
+                new AgentInput(42L, "Latency", "LATENCY", List.of()),
+                Instant.parse("2026-08-30T11:00:00Z")
+        );
+
+        JsonNode payload = objectMapper.readTree(objectMapper.writeValueAsString(event));
+
+        assertThat(payload.get("capabilities").get(0).asText()).isEqualTo("log-analyzer");
+        assertThat(payload.get("capabilities").get(1).asText()).isEqualTo("metric-analyzer");
+    }
 
     @Test
     void shouldDeserializePythonStepEventContract() throws Exception {

@@ -58,6 +58,11 @@ class AgentExecutionPersistenceServiceTest {
         assertThat(preparation.event().eventId()).isEqualTo(requestEventId);
         assertThat(preparation.event().executionId()).isEqualTo(99L);
         assertThat(preparation.event().agentVersion()).isEqualTo("1.0");
+        assertThat(preparation.event().capabilities()).containsExactly(
+                "log-analyzer",
+                "metric-analyzer",
+                "trace-analyzer"
+        );
         assertThat(preparation.event().limits().maxSteps()).isEqualTo(10);
         assertThat(preparation.event().limits().timeoutSeconds()).isEqualTo(60L);
         assertThat(preparation.event().input().incidentId()).isEqualTo(42L);

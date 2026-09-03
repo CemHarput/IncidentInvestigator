@@ -75,6 +75,7 @@ public class AgentExecutionPersistenceService {
                 execution.getId(),
                 definition.name(),
                 definition.version(),
+                definition.capabilities(),
                 new AgentLimitsContract(
                         definition.limits().maxSteps(),
                         definition.limits().timeout().toSeconds()

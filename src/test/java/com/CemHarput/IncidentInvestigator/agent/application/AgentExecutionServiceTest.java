@@ -75,6 +75,7 @@ class AgentExecutionServiceTest {
                 99L,
                 "incident-root-cause-agent",
                 "1.0",
+                List.of("log-analyzer", "metric-analyzer", "trace-analyzer"),
                 new AgentLimitsContract(10, 60),
                 new AgentInput(42L, "Latency", "LATENCY", List.of()),
                 Instant.now()
